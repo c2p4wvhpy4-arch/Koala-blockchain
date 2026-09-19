@@ -72,9 +72,6 @@ const koala = new KoalaBlockchain();
 let databaseReady = false;
 let synchronized = USE_DATABASE;
 
-// Liste des pairs en mémoire.
-// Sur le nœud PostgreSQL, elle est également persistée en base.
-
 const memoryNodes = new Map();
 
 // ============================================================
@@ -159,7 +156,7 @@ async function fetchJson(
     if (!response.ok) {
       throw new Error(
         data?.error ||
-          `HTTP ${response.status}`
+        `HTTP ${response.status}`
       );
     }
 
@@ -235,18 +232,11 @@ async function createTables() {
     );
   `);
 
-  console.log(
-    "Tables PostgreSQL KOA : OK"
-  );
-
-  console.log(
-    "Table réseau KOA : OK"
-  );
+  console.log("Tables PostgreSQL KOA : OK");
+  console.log("Table réseau KOA : OK");
 }
 
-async function getStoredState(
-  client = pool
-) {
+async function getStoredState(client = pool) {
   if (!USE_DATABASE) {
     return {};
   }
@@ -263,18 +253,14 @@ async function getStoredState(
     : {};
 }
 
-async function saveState(
-  client = pool
-) {
+async function saveState(client = pool) {
   if (!USE_DATABASE) {
     return;
   }
 
   const state = {
     hashFormat: HASH_FORMAT_VERSION,
-
-    totalMined:
-      koala.totalMined,
+    totalMined: koala.totalMined,
 
     pendingTransactions:
       canonicalTransactions(
@@ -289,6 +275,7 @@ async function saveState(
       value,
       updated_at
     )
+
     VALUES (
       'blockchain',
       $1::jsonb,
@@ -301,9 +288,7 @@ async function saveState(
       value = EXCLUDED.value,
       updated_at = NOW()
     `,
-    [
-      JSON.stringify(state)
-    ]
+    [JSON.stringify(state)]
   );
 }
 
@@ -320,18 +305,18 @@ async function getNodes() {
       }));
   }
 
-  const result =
-    await pool.query(`
-      SELECT
-        url,
-        created_at,
-        last_seen_at
-      FROM koa_nodes
-      ORDER BY id ASC
-    `);
+  const result = await pool.query(`
+    SELECT
+      url,
+      created_at,
+      last_seen_at
 
-  const merged =
-    new Map();
+    FROM koa_nodes
+
+    ORDER BY id ASC
+  `);
+
+  const merged = new Map();
 
   for (const row of result.rows) {
     merged.set(
@@ -358,8 +343,7 @@ async function getNodes() {
 }
 
 async function getNodeUrls() {
-  const nodes =
-    await getNodes();
+  const nodes = await getNodes();
 
   return nodes
     .map(node =>
@@ -380,9 +364,7 @@ async function getNodeUrls() {
     );
 }
 
-async function registerNode(
-  nodeUrl
-) {
+async function registerNode(nodeUrl) {
   const normalized =
     normalizeNodeUrl(
       nodeUrl
@@ -447,17 +429,12 @@ async function registerNode(
 
         RETURNING url
         `,
-        [
-          normalized
-        ]
+        [normalized]
       );
 
     return {
       added: true,
-
-      url:
-        result.rows[0].url,
-
+      url: result.rows[0].url,
       self: false
     };
   }
@@ -476,13 +453,8 @@ async function registerNode(
 function blockFromRow(row) {
   const block =
     new Block(
-      Number(
-        row.block_index
-      ),
-
-      Number(
-        row.timestamp
-      ),
+      Number(row.block_index),
+      Number(row.timestamp),
 
       canonicalTransactions(
         Array.isArray(
@@ -517,7 +489,6 @@ function blockFromNetwork(raw) {
   const block =
     new Block(
       Number(raw.index),
-
       Number(raw.timestamp),
 
       canonicalTransactions(
@@ -542,9 +513,7 @@ function blockFromNetwork(raw) {
   return block;
 }
 
-function buildNetworkChain(
-  rawChain
-) {
+function buildNetworkChain(rawChain) {
   if (
     !Array.isArray(rawChain) ||
     rawChain.length === 0
@@ -559,9 +528,7 @@ function buildNetworkChain(
   );
 }
 
-function calculateTotalMinedForChain(
-  chain
-) {
+function calculateTotalMinedForChain(chain) {
   let total = 0;
 
   for (const block of chain) {
@@ -587,9 +554,7 @@ function calculateTotalMined() {
   );
 }
 
-function validateExternalChain(
-  rawChain
-) {
+function validateExternalChain(rawChain) {
   try {
     const chain =
       buildNetworkChain(
@@ -628,6 +593,34 @@ function validateExternalChain(
       totalMined: 0
     };
   }
+}
+
+// ============================================================
+// TRANSACTIONS : OUTILS
+// ============================================================
+
+function transactionId(transaction) {
+  return [
+    transaction.fromAddress,
+    transaction.toAddress,
+    Number(transaction.amount),
+    Number(transaction.timestamp),
+    transaction.signature || ""
+  ].join("|");
+}
+
+function pendingContains(transaction) {
+  const id =
+    transactionId(
+      transaction
+    );
+
+  return koala
+    .pendingTransactions
+    .some(
+      tx =>
+        transactionId(tx) === id
+    );
 }
 
 // ============================================================
@@ -714,9 +707,7 @@ async function insertBlockWithClient(
   }
 }
 
-async function saveBlock(
-  block
-) {
+async function saveBlock(block) {
   if (!USE_DATABASE) {
     return true;
   }
@@ -742,9 +733,7 @@ async function saveBlock(
 
         LIMIT 1
         `,
-        [
-          block.index
-        ]
+        [block.index]
       );
 
     if (
@@ -791,9 +780,7 @@ async function saveBlock(
   }
 }
 
-async function replaceChain(
-  newChain
-) {
+async function replaceChain(newChain) {
   const validation =
     validateExternalChain(
       newChain
@@ -1098,7 +1085,6 @@ async function ensureHashFormat() {
     await pool.query(`
       SELECT
         COUNT(*)::integer AS count
-
       FROM koa_blocks
     `);
 
@@ -1191,6 +1177,108 @@ async function restoreBlockchain() {
   console.log(
     `KOA créés : ${koala.totalMined}`
   );
+
+  console.log(
+    `Transactions en attente restaurées : ${koala.pendingTransactions.length}`
+  );
+}
+
+// ============================================================
+// SYNCHRONISATION DES TRANSACTIONS EN ATTENTE
+// ============================================================
+
+async function syncPendingTransactionsFromNode(
+  nodeUrl
+) {
+  const node =
+    normalizeNodeUrl(
+      nodeUrl
+    );
+
+  if (!node) {
+    return 0;
+  }
+
+  try {
+    const pendingData =
+      await fetchJson(
+        `${node}/api/transactions/pending`,
+        {},
+        15000
+      );
+
+    if (
+      !Array.isArray(
+        pendingData
+      )
+    ) {
+      console.log(
+        "Transactions en attente synchronisées : 0"
+      );
+
+      return 0;
+    }
+
+    let imported = 0;
+
+    for (
+      const raw
+      of pendingData
+    ) {
+      try {
+        const transaction =
+          Object.assign(
+            new Transaction(),
+            raw
+          );
+
+        if (
+          !transaction.isValid()
+        ) {
+          console.error(
+            "Transaction en attente ignorée : signature invalide."
+          );
+
+          continue;
+        }
+
+        if (
+          pendingContains(
+            transaction
+          )
+        ) {
+          continue;
+        }
+
+        // createTransaction vérifie notamment
+        // la validité et le solde disponible.
+
+        koala.createTransaction(
+          transaction
+        );
+
+        imported++;
+      } catch (error) {
+        console.error(
+          "Transaction en attente ignorée :",
+          error.message
+        );
+      }
+    }
+
+    console.log(
+      `Transactions en attente synchronisées : ${imported}`
+    );
+
+    return imported;
+  } catch (error) {
+    console.error(
+      "Synchronisation des transactions en attente : ÉCHEC -",
+      error.message
+    );
+
+    return 0;
+  }
 }
 
 // ============================================================
@@ -1229,6 +1317,10 @@ async function syncFromBootstrap() {
     `Synchronisation depuis : ${bootstrap}`
   );
 
+  // ----------------------------------------------------------
+  // 1. RÉCUPÉRATION DE LA BLOCKCHAIN
+  // ----------------------------------------------------------
+
   const data =
     await fetchJson(
       `${bootstrap}/api/chain`,
@@ -1238,7 +1330,9 @@ async function syncFromBootstrap() {
 
   if (
     !data ||
-    !Array.isArray(data.chain)
+    !Array.isArray(
+      data.chain
+    )
   ) {
     throw new Error(
       "Réponse BOOTSTRAP_NODE invalide."
@@ -1250,14 +1344,16 @@ async function syncFromBootstrap() {
       data.chain
     );
 
-  if (!validation.valid) {
+  if (
+    !validation.valid
+  ) {
     throw new Error(
       "Blockchain du BOOTSTRAP_NODE invalide."
     );
   }
 
-  // Remplace le Genesis aléatoire
-  // créé localement.
+  // Remplace le Genesis local par
+  // le Genesis historique du réseau.
 
   koala.chain =
     validation.chain;
@@ -1267,6 +1363,15 @@ async function syncFromBootstrap() {
 
   koala.pendingTransactions =
     [];
+
+  // ----------------------------------------------------------
+  // 2. RÉCUPÉRATION DU MEMPOOL
+  // ----------------------------------------------------------
+
+  const pendingImported =
+    await syncPendingTransactionsFromNode(
+      bootstrap
+    );
 
   synchronized = true;
 
@@ -1281,6 +1386,20 @@ async function syncFromBootstrap() {
   console.log(
     `KOA synchronisés : ${koala.totalMined}`
   );
+
+  console.log(
+    `Mempool synchronisé : ${koala.pendingTransactions.length} transaction(s)`
+  );
+
+  return {
+    blocks:
+      koala.chain.length,
+
+    totalMined:
+      koala.totalMined,
+
+    pendingImported
+  };
 }
 
 // ============================================================
@@ -1297,9 +1416,6 @@ async function registerWithBootstrap() {
     normalizeNodeUrl(
       NODE_URL
     );
-
-  // Le nœud principal n'a normalement
-  // pas de BOOTSTRAP_NODE.
 
   if (
     !bootstrap ||
@@ -1336,17 +1452,15 @@ async function registerWithBootstrap() {
       {
         method: "POST",
 
-        body: JSON.stringify({
-          nodeUrl:
-            currentNode
-        })
+        body:
+          JSON.stringify({
+            nodeUrl:
+              currentNode
+          })
       },
 
       15000
     );
-
-    // Conserve également le bootstrap
-    // dans la liste locale du nœud 2.
 
     await registerNode(
       bootstrap
@@ -1360,9 +1474,6 @@ async function registerWithBootstrap() {
       `${currentNode} <-> ${bootstrap}`
     );
   } catch (error) {
-    // Une panne temporaire du nœud principal
-    // ne doit pas empêcher le nœud de démarrer.
-
     console.error(
       "Enregistrement réseau automatique : ÉCHEC -",
       error.message
@@ -1371,41 +1482,8 @@ async function registerWithBootstrap() {
 }
 
 // ============================================================
-// TRANSACTIONS
+// DIFFUSION DES TRANSACTIONS
 // ============================================================
-
-function transactionId(
-  transaction
-) {
-  return [
-    transaction.fromAddress,
-    transaction.toAddress,
-    Number(
-      transaction.amount
-    ),
-    Number(
-      transaction.timestamp
-    ),
-    transaction.signature || ""
-  ].join("|");
-}
-
-function pendingContains(
-  transaction
-) {
-  const id =
-    transactionId(
-      transaction
-    );
-
-  return koala
-    .pendingTransactions
-    .some(
-      tx =>
-        transactionId(tx) ===
-        id
-    );
-}
 
 async function broadcastTransaction(
   transaction
@@ -1449,6 +1527,10 @@ async function broadcastTransaction(
     })
   );
 }
+
+// ============================================================
+// DIFFUSION DES BLOCS
+// ============================================================
 
 async function broadcastBlock(
   block
@@ -1590,10 +1672,12 @@ app.get(
           koala.isChainValid()
       });
     } catch (error) {
-      res.status(500).json({
-        error:
-          error.message
-      });
+      res
+        .status(500)
+        .json({
+          error:
+            error.message
+        });
     }
   }
 );
@@ -1663,6 +1747,10 @@ app.get(
   }
 );
 
+// ============================================================
+// WALLET
+// ============================================================
+
 app.post(
   "/api/wallet",
   (req, res) => {
@@ -1719,6 +1807,10 @@ app.get(
   }
 );
 
+// ============================================================
+// TRANSACTIONS
+// ============================================================
+
 app.get(
   "/api/transactions/pending",
   (req, res) => {
@@ -1740,7 +1832,7 @@ app.get(
 );
 
 // ============================================================
-// CRÉATION TRANSACTION
+// CRÉATION D'UNE TRANSACTION
 // ============================================================
 
 app.post(
@@ -1752,6 +1844,7 @@ app.post(
           .status(503)
           .json({
             success: false,
+
             error:
               "Nœud non synchronisé."
           });
@@ -1800,6 +1893,7 @@ app.post(
           .status(400)
           .json({
             success: false,
+
             error:
               "Montant KOA invalide."
           });
@@ -1815,6 +1909,7 @@ app.post(
           .status(400)
           .json({
             success: false,
+
             error:
               "Timestamp invalide."
           });
@@ -1823,7 +1918,7 @@ app.post(
       if (
         Math.abs(
           Date.now() -
-            numericTimestamp
+          numericTimestamp
         ) >
         10 * 60 * 1000
       ) {
@@ -1858,6 +1953,7 @@ app.post(
           .status(400)
           .json({
             success: false,
+
             error:
               "Signature KOA invalide."
           });
@@ -1896,6 +1992,7 @@ app.post(
         .status(400)
         .json({
           success: false,
+
           error:
             error.message
         });
@@ -1904,7 +2001,7 @@ app.post(
 );
 
 // ============================================================
-// TRANSACTION RÉSEAU
+// TRANSACTION REÇUE DU RÉSEAU
 // ============================================================
 
 app.post(
@@ -1916,6 +2013,7 @@ app.post(
           .status(503)
           .json({
             success: false,
+
             error:
               "Nœud non synchronisé."
           });
@@ -1929,6 +2027,7 @@ app.post(
           .status(400)
           .json({
             success: false,
+
             error:
               "Transaction manquante."
           });
@@ -1983,6 +2082,7 @@ app.post(
         .status(400)
         .json({
           success: false,
+
           error:
             error.message
         });
@@ -2097,6 +2197,7 @@ app.post(
         .status(400)
         .json({
           success: false,
+
           error:
             error.message
         });
@@ -2105,7 +2206,7 @@ app.post(
 );
 
 // ============================================================
-// BLOC RÉSEAU
+// BLOC REÇU DU RÉSEAU
 // ============================================================
 
 app.post(
@@ -2133,6 +2234,7 @@ app.post(
           .status(400)
           .json({
             success: false,
+
             error:
               "Bloc manquant."
           });
@@ -2153,7 +2255,7 @@ app.post(
       if (
         existing &&
         existing.hash ===
-          incomingBlock.hash
+        incomingBlock.hash
       ) {
         return res.json({
           success: true,
@@ -2218,7 +2320,8 @@ app.post(
 
       const confirmedIds =
         new Set(
-          incomingBlock.transactions
+          incomingBlock
+            .transactions
 
             .filter(
               tx =>
@@ -2282,6 +2385,7 @@ app.post(
         .status(400)
         .json({
           success: false,
+
           error:
             error.message
         });
@@ -2321,6 +2425,7 @@ app.get(
         .status(500)
         .json({
           success: false,
+
           error:
             error.message
         });
@@ -2353,6 +2458,7 @@ app.post(
         .status(400)
         .json({
           success: false,
+
           error:
             error.message
         });
@@ -2374,6 +2480,7 @@ app.post(
           .status(400)
           .json({
             success: false,
+
             error:
               "URL du nœud invalide."
           });
@@ -2472,6 +2579,7 @@ app.post(
         .status(400)
         .json({
           success: false,
+
           error:
             error.message
         });
@@ -2573,6 +2681,21 @@ app.post(
           bestChain
         );
 
+        // Après remplacement de chaîne,
+        // tente aussi de récupérer le mempool
+        // du nœud ayant fourni la chaîne.
+
+        if (
+          source &&
+          source !== "local"
+        ) {
+          await syncPendingTransactionsFromNode(
+            source
+          );
+
+          await saveState();
+        }
+
         return res.json({
           success: true,
 
@@ -2588,6 +2711,11 @@ app.post(
 
           totalMined:
             koala.totalMined,
+
+          pendingTransactions:
+            koala
+              .pendingTransactions
+              .length,
 
           checked
         });
@@ -2607,6 +2735,11 @@ app.post(
         totalMined:
           koala.totalMined,
 
+        pendingTransactions:
+          koala
+            .pendingTransactions
+            .length,
+
         checked
       });
     } catch (error) {
@@ -2619,12 +2752,17 @@ app.post(
         .status(500)
         .json({
           success: false,
+
           error:
             error.message
         });
     }
   }
 );
+
+// ============================================================
+// VALIDATION
+// ============================================================
 
 app.get(
   "/api/validate",
@@ -2647,7 +2785,12 @@ app.get(
         koala.chain.length,
 
       totalMined:
-        koala.totalMined
+        koala.totalMined,
+
+      pendingTransactions:
+        koala
+          .pendingTransactions
+          .length
     });
   }
 );
@@ -2706,9 +2849,11 @@ async function start() {
         "Aucune nouvelle blockchain KOA ne sera créée."
       );
 
-      // Le nœud mémoire récupère
-      // le Genesis historique et toute
-      // la chaîne depuis le bootstrap.
+      // Récupère :
+      // - le Genesis historique
+      // - tous les blocs
+      // - le total de KOA
+      // - les transactions en attente
 
       await syncFromBootstrap();
 
@@ -2721,16 +2866,10 @@ async function start() {
       }
     }
 
-    // ========================================================
-    // NOUVEAU :
-    // ENREGISTREMENT AUTOMATIQUE NŒUD 1 <-> NŒUD 2
-    // ========================================================
+    // Enregistrement automatique
+    // du nœud 2 auprès du nœud 1.
 
     await registerWithBootstrap();
-
-    // ========================================================
-    // SERVEUR HTTP
-    // ========================================================
 
     app.listen(
       PORT,
@@ -2758,6 +2897,10 @@ async function start() {
 
         console.log(
           `KOA créés : ${koala.totalMined}`
+        );
+
+        console.log(
+          `Transactions en attente : ${koala.pendingTransactions.length}`
         );
 
         console.log(
