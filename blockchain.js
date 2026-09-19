@@ -20,12 +20,6 @@ function isHex(value) {
 
 // ============================================================
 // SÉRIALISATION DÉTERMINISTE
-//
-// IMPORTANT :
-// PostgreSQL JSONB peut restituer les propriétés JSON dans un
-// ordre différent.
-//
-// On ne dépend donc plus de l'ordre des propriétés d'un objet.
 // ============================================================
 
 function canonicalTransaction(transaction) {
@@ -65,17 +59,13 @@ function canonicalTransactions(transactions) {
 
   return transactions.map(
     transaction =>
-      canonicalTransaction(
-        transaction
-      )
+      canonicalTransaction(transaction)
   );
 }
 
 function serializeTransactions(transactions) {
   return JSON.stringify(
-    canonicalTransactions(
-      transactions
-    )
+    canonicalTransactions(transactions)
   );
 }
 
@@ -111,13 +101,6 @@ function normalizePublicKey(publicKey) {
       "Format de clé publique invalide."
     );
   }
-
-  /*
-    secp256k1 :
-
-    33 octets compressés = 66 caractères hex
-    65 octets non compressés = 130 caractères hex
-  */
 
   if (
     key.length !== 66 &&
@@ -225,7 +208,6 @@ function createWallet() {
         publicKeyEncoding: {
           type:
             "spki",
-
           format:
             "pem"
         },
@@ -233,7 +215,6 @@ function createWallet() {
         privateKeyEncoding: {
           type:
             "pkcs8",
-
           format:
             "pem"
         }
@@ -247,7 +228,6 @@ function createWallet() {
       ),
 
     publicKey,
-
     privateKey
   };
 }
@@ -281,10 +261,6 @@ class Transaction {
     this.signature =
       null;
   }
-
-  // ==========================================================
-  // HASH DE TRANSACTION
-  // ==========================================================
 
   calculateHash() {
     return sha256(
@@ -360,28 +336,43 @@ class Transaction {
   }
 
   // ==========================================================
-  // VALIDATION TRANSACTION
+  // VALIDATION
   // ==========================================================
 
   isValid() {
-    /*
-      Récompense minière :
-      pas d'expéditeur et pas de signature.
-    */
+    if (
+      !Number.isFinite(
+        Number(this.amount)
+      ) ||
+      Number(this.amount) <= 0
+    ) {
+      return false;
+    }
+
+    if (
+      typeof this.toAddress !==
+        "string" ||
+      !this.toAddress
+    ) {
+      return false;
+    }
+
+    // --------------------------------------------------------
+    // RÉCOMPENSE MINIÈRE
+    // --------------------------------------------------------
 
     if (
       this.fromAddress === null
     ) {
       return (
-        typeof this.toAddress ===
-          "string" &&
-        this.toAddress.length > 0 &&
-        Number.isFinite(
-          Number(this.amount)
-        ) &&
-        Number(this.amount) > 0
+        !this.publicKey &&
+        !this.signature
       );
     }
+
+    // --------------------------------------------------------
+    // TRANSACTION NORMALE
+    // --------------------------------------------------------
 
     if (
       !this.signature ||
@@ -440,9 +431,7 @@ class Transaction {
         )
       );
 
-    } catch (
-      error
-    ) {
+    } catch (error) {
       console.error(
         "Erreur vérification signature :",
         error.message
@@ -485,10 +474,6 @@ class Block {
       this.calculateHash();
   }
 
-  // ==========================================================
-  // HASH DÉTERMINISTE
-  // ==========================================================
-
   calculateHash() {
     return sha256(
       String(this.index) +
@@ -500,10 +485,6 @@ class Block {
       String(this.nonce)
     );
   }
-
-  // ==========================================================
-  // MINAGE
-  // ==========================================================
 
   mineBlock(
     difficulty
@@ -529,10 +510,6 @@ class Block {
       `Bloc #${this.index} miné : ${this.hash}`
     );
   }
-
-  // ==========================================================
-  // VALIDATION DES TRANSACTIONS
-  // ==========================================================
 
   hasValidTransactions() {
     return this
@@ -842,7 +819,7 @@ class KoalaBlockchain {
   }
 
   // ==========================================================
-  // VALIDATION BLOCKCHAIN
+  // VALIDATION COMPLÈTE DE LA BLOCKCHAIN
   // ==========================================================
 
   isChainValid() {
@@ -859,6 +836,65 @@ class KoalaBlockchain {
       return false;
     }
 
+    const genesis =
+      this.chain[0];
+
+    // --------------------------------------------------------
+    // GENESIS
+    // --------------------------------------------------------
+
+    if (
+      genesis.index !== 0 ||
+      genesis.previousHash !==
+        "0"
+    ) {
+      console.error(
+        "Bloc Genesis invalide."
+      );
+
+      return false;
+    }
+
+    if (
+      genesis.hash !==
+      genesis.calculateHash()
+    ) {
+      console.error(
+        "Hash du bloc Genesis invalide."
+      );
+
+      return false;
+    }
+
+    if (
+      genesis.transactions.length !==
+      0
+    ) {
+      console.error(
+        "Le bloc Genesis contient des transactions."
+      );
+
+      return false;
+    }
+
+    // Soldes reconstruits uniquement depuis
+    // la blockchain validée.
+
+    const balances =
+      new Map();
+
+    let totalMined =
+      0;
+
+    const target =
+      "0".repeat(
+        this.difficulty
+      );
+
+    // --------------------------------------------------------
+    // BLOCS
+    // --------------------------------------------------------
+
     for (
       let i = 1;
       i < this.chain.length;
@@ -872,6 +908,25 @@ class KoalaBlockchain {
           i - 1
         ];
 
+      // ------------------------------------------------------
+      // INDEX
+      // ------------------------------------------------------
+
+      if (
+        currentBlock.index !==
+        i
+      ) {
+        console.error(
+          `Bloc #${i} : index invalide`
+        );
+
+        return false;
+      }
+
+      // ------------------------------------------------------
+      // HASH
+      // ------------------------------------------------------
+
       const recalculatedHash =
         currentBlock
           .calculateHash();
@@ -884,18 +939,12 @@ class KoalaBlockchain {
           `Bloc #${currentBlock.index} : hash invalide`
         );
 
-        console.error(
-          "Hash enregistré :",
-          currentBlock.hash
-        );
-
-        console.error(
-          "Hash recalculé :",
-          recalculatedHash
-        );
-
         return false;
       }
+
+      // ------------------------------------------------------
+      // PREVIOUS HASH
+      // ------------------------------------------------------
 
       if (
         currentBlock.previousHash !==
@@ -905,25 +954,211 @@ class KoalaBlockchain {
           `Bloc #${currentBlock.index} : previousHash invalide`
         );
 
-        console.error(
-          "PreviousHash enregistré :",
-          currentBlock.previousHash
-        );
+        return false;
+      }
 
+      // ------------------------------------------------------
+      // PROOF OF WORK
+      // ------------------------------------------------------
+
+      if (
+        !currentBlock.hash.startsWith(
+          target
+        )
+      ) {
         console.error(
-          "Hash bloc précédent :",
-          previousBlock.hash
+          `Bloc #${currentBlock.index} : preuve de travail invalide`
         );
 
         return false;
       }
 
+      // ------------------------------------------------------
+      // TRANSACTIONS
+      // ------------------------------------------------------
+
       if (
-        !currentBlock
-          .hasValidTransactions()
+        !Array.isArray(
+          currentBlock.transactions
+        )
+      ) {
+        return false;
+      }
+
+      let rewardCount =
+        0;
+
+      for (
+        let txIndex = 0;
+        txIndex <
+        currentBlock.transactions.length;
+        txIndex++
+      ) {
+        const rawTransaction =
+          currentBlock.transactions[
+            txIndex
+          ];
+
+        const transaction =
+          Object.assign(
+            new Transaction(),
+            rawTransaction
+          );
+
+        if (
+          !transaction.isValid()
+        ) {
+          console.error(
+            `Bloc #${currentBlock.index} : transaction invalide`
+          );
+
+          return false;
+        }
+
+        // ----------------------------------------------------
+        // RÉCOMPENSE MINIÈRE
+        // ----------------------------------------------------
+
+        if (
+          transaction.fromAddress ===
+          null
+        ) {
+          rewardCount++;
+
+          // Une seule récompense par bloc.
+
+          if (
+            rewardCount > 1
+          ) {
+            console.error(
+              `Bloc #${currentBlock.index} : plusieurs récompenses minières`
+            );
+
+            return false;
+          }
+
+          // La récompense doit être la dernière
+          // transaction du bloc.
+
+          if (
+            txIndex !==
+            currentBlock.transactions.length -
+              1
+          ) {
+            console.error(
+              `Bloc #${currentBlock.index} : récompense mal positionnée`
+            );
+
+            return false;
+          }
+
+          const remainingSupply =
+            this.maxSupply -
+            totalMined;
+
+          const expectedReward =
+            Math.min(
+              this.miningReward,
+              remainingSupply
+            );
+
+          if (
+            Number(
+              transaction.amount
+            ) !==
+            expectedReward
+          ) {
+            console.error(
+              `Bloc #${currentBlock.index} : récompense minière invalide`
+            );
+
+            return false;
+          }
+
+          totalMined +=
+            Number(
+              transaction.amount
+            );
+
+          if (
+            totalMined >
+            this.maxSupply
+          ) {
+            console.error(
+              "MAX SUPPLY KOA dépassée."
+            );
+
+            return false;
+          }
+
+          const minerBalance =
+            balances.get(
+              transaction.toAddress
+            ) || 0;
+
+          balances.set(
+            transaction.toAddress,
+            minerBalance +
+              Number(
+                transaction.amount
+              )
+          );
+
+          continue;
+        }
+
+        // ----------------------------------------------------
+        // TRANSACTION NORMALE
+        // ----------------------------------------------------
+
+        const amount =
+          Number(
+            transaction.amount
+          );
+
+        const senderBalance =
+          balances.get(
+            transaction.fromAddress
+          ) || 0;
+
+        if (
+          senderBalance <
+          amount
+        ) {
+          console.error(
+            `Bloc #${currentBlock.index} : double dépense ou solde insuffisant`
+          );
+
+          return false;
+        }
+
+        balances.set(
+          transaction.fromAddress,
+          senderBalance -
+            amount
+        );
+
+        const receiverBalance =
+          balances.get(
+            transaction.toAddress
+          ) || 0;
+
+        balances.set(
+          transaction.toAddress,
+          receiverBalance +
+            amount
+        );
+      }
+
+      // ------------------------------------------------------
+      // EXACTEMENT UNE RÉCOMPENSE PAR BLOC MINÉ
+      // ------------------------------------------------------
+
+      if (
+        rewardCount !== 1
       ) {
         console.error(
-          `Bloc #${currentBlock.index} : transaction invalide`
+          `Bloc #${currentBlock.index} : récompense minière manquante`
         );
 
         return false;
@@ -931,7 +1166,7 @@ class KoalaBlockchain {
     }
 
     console.log(
-      "Validation blockchain : OK"
+      "Validation blockchain renforcée : OK"
     );
 
     return true;
