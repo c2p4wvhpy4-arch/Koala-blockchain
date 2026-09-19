@@ -1,21 +1,30 @@
 const express = require("express");
 const path = require("path");
-const crypto = require("crypto");
 const { Pool } = require("pg");
 
 const {
   KoalaBlockchain,
   Transaction,
-  createWallet
+  Block,
+  createWallet,
+  canonicalTransactions
 } = require("./blockchain");
 
 const app = express();
 
-const PORT = Number(process.env.PORT || 3000);
-const DATABASE_URL = process.env.DATABASE_URL;
+const PORT =
+  Number(process.env.PORT || 3000);
+
+const DATABASE_URL =
+  process.env.DATABASE_URL;
+
+const HASH_FORMAT_VERSION = 2;
 
 if (!DATABASE_URL) {
-  console.error("DATABASE_URL non configurée.");
+  console.error(
+    "DATABASE_URL non configurée."
+  );
+
   process.exit(1);
 }
 
@@ -27,7 +36,10 @@ app.use(express.json());
 
 app.use(
   express.static(
-    path.join(__dirname, "public")
+    path.join(
+      __dirname,
+      "public"
+    )
   )
 );
 
@@ -70,24 +82,29 @@ app.get(
 // POSTGRESQL
 // ============================================================
 
-const pool = new Pool({
-  connectionString: DATABASE_URL,
+const pool =
+  new Pool({
+    connectionString:
+      DATABASE_URL,
 
-  ssl:
-    process.env.NODE_ENV === "production"
-      ? {
-          rejectUnauthorized: false
-        }
-      : false
-});
+    ssl:
+      process.env.NODE_ENV ===
+      "production"
+        ? {
+            rejectUnauthorized:
+              false
+          }
+        : false
+  });
 
 const koala =
   new KoalaBlockchain();
 
-let databaseReady = false;
+let databaseReady =
+  false;
 
 // ============================================================
-// CRÉATION DES TABLES KOALA
+// CRÉATION DES TABLES
 // ============================================================
 
 async function createTables() {
@@ -145,12 +162,50 @@ async function createTables() {
 }
 
 // ============================================================
+// LECTURE ÉTAT
+// ============================================================
+
+async function getStoredState(
+  client = pool
+) {
+  const result =
+    await client.query(`
+      SELECT value
+      FROM koa_state
+      WHERE key = 'blockchain'
+      LIMIT 1
+    `);
+
+  if (
+    result.rows.length === 0
+  ) {
+    return {};
+  }
+
+  return (
+    result.rows[0].value ||
+    {}
+  );
+}
+
+// ============================================================
 // SAUVEGARDE ÉTAT
 // ============================================================
 
 async function saveState(
   client = pool
 ) {
+  const state = {
+    hashFormat:
+      HASH_FORMAT_VERSION,
+
+    totalMined:
+      koala.totalMined,
+
+    pendingTransactions:
+      koala.pendingTransactions
+  };
+
   await client.query(
     `
     INSERT INTO koa_state (
@@ -169,15 +224,65 @@ async function saveState(
       updated_at = NOW()
     `,
     [
-      JSON.stringify({
-        totalMined:
-          koala.totalMined,
-
-        pendingTransactions:
-          koala.pendingTransactions
-      })
+      JSON.stringify(
+        state
+      )
     ]
   );
+}
+
+// ============================================================
+// CONSTRUCTION D'UN BLOC DEPUIS POSTGRESQL
+// ============================================================
+
+function blockFromRow(row) {
+  const transactions =
+    canonicalTransactions(
+      Array.isArray(
+        row.transactions
+      )
+        ? row.transactions
+        : []
+    );
+
+  const block =
+    new Block(
+      Number(
+        row.block_index
+      ),
+
+      Number(
+        row.timestamp
+      ),
+
+      transactions,
+
+      row.previous_hash
+    );
+
+  block.nonce =
+    Number(
+      row.nonce
+    );
+
+  /*
+    IMPORTANT :
+
+    Le constructeur calcule automatiquement
+    un nouveau hash.
+
+    Lors de la restauration normale,
+    on remet ensuite le hash enregistré
+    dans PostgreSQL.
+
+    Cela permet à isChainValid()
+    de le comparer au hash recalculé.
+  */
+
+  block.hash =
+    row.hash;
+
+  return block;
 }
 
 // ============================================================
@@ -226,19 +331,16 @@ async function saveBlock(
           block.nonce,
 
           JSON.stringify(
-            block.transactions
+            canonicalTransactions(
+              block.transactions
+            )
           )
         ]
       );
 
-    /*
-      Les transactions ne sont ajoutées
-      que si le bloc vient réellement
-      d'être enregistré.
-    */
-
     if (
-      insertedBlock.rowCount > 0
+      insertedBlock.rowCount >
+      0
     ) {
       for (
         const tx
@@ -269,12 +371,24 @@ async function saveBlock(
           `,
           [
             block.index,
+
             tx.fromAddress,
+
             tx.toAddress,
-            tx.amount,
-            tx.publicKey || null,
-            tx.signature || null,
-            tx.timestamp
+
+            Number(
+              tx.amount
+            ),
+
+            tx.publicKey ||
+              null,
+
+            tx.signature ||
+              null,
+
+            Number(
+              tx.timestamp
+            )
           ]
         );
       }
@@ -301,6 +415,375 @@ async function saveBlock(
 }
 
 // ============================================================
+// CALCUL DU TOTAL DE KOA DEPUIS LA BLOCKCHAIN
+// ============================================================
+
+function calculateTotalMined() {
+  let total = 0;
+
+  for (
+    const block
+    of koala.chain
+  ) {
+    for (
+      const tx
+      of block.transactions
+    ) {
+      if (
+        tx.fromAddress ===
+        null
+      ) {
+        total +=
+          Number(
+            tx.amount
+          );
+      }
+    }
+  }
+
+  return total;
+}
+
+// ============================================================
+// MIGRATION ANCIEN HASH -> HASH FORMAT 2
+//
+// Cette fonction ne modifie PAS :
+//
+// - les transactions
+// - les montants
+// - les adresses
+// - les timestamps des transactions
+// - les soldes
+//
+// Elle recalcule uniquement :
+//
+// - previousHash
+// - hash
+//
+// pour rendre les blocs compatibles avec la sérialisation
+// déterministe.
+// ============================================================
+
+async function migrateHashFormat() {
+  console.log(
+    "Migration blockchain vers hash format 2..."
+  );
+
+  const client =
+    await pool.connect();
+
+  try {
+    await client.query(
+      "BEGIN"
+    );
+
+    const result =
+      await client.query(`
+        SELECT *
+        FROM koa_blocks
+        ORDER BY block_index ASC
+        FOR UPDATE
+      `);
+
+    if (
+      result.rows.length ===
+      0
+    ) {
+      await client.query(
+        "COMMIT"
+      );
+
+      return;
+    }
+
+    const migratedChain =
+      [];
+
+    for (
+      let i = 0;
+      i <
+      result.rows.length;
+      i++
+    ) {
+      const row =
+        result.rows[i];
+
+      const transactions =
+        canonicalTransactions(
+          Array.isArray(
+            row.transactions
+          )
+            ? row.transactions
+            : []
+        );
+
+      let previousHash;
+
+      if (i === 0) {
+        /*
+          Genesis conserve son previousHash.
+        */
+
+        previousHash =
+          row.previous_hash;
+      } else {
+        previousHash =
+          migratedChain[
+            i - 1
+          ].hash;
+      }
+
+      const block =
+        new Block(
+          Number(
+            row.block_index
+          ),
+
+          Number(
+            row.timestamp
+          ),
+
+          transactions,
+
+          previousHash
+        );
+
+      /*
+        On conserve le nonce historique.
+
+        Le hash est ensuite recalculé avec
+        la nouvelle sérialisation déterministe.
+      */
+
+      block.nonce =
+        Number(
+          row.nonce
+        );
+
+      block.hash =
+        block.calculateHash();
+
+      migratedChain.push(
+        block
+      );
+    }
+
+    /*
+      On met d'abord des hash temporaires.
+
+      Cela évite un conflit avec la contrainte
+      UNIQUE de la colonne hash pendant la
+      migration.
+    */
+
+    for (
+      const block
+      of migratedChain
+    ) {
+      await client.query(
+        `
+        UPDATE koa_blocks
+        SET hash = $1
+        WHERE block_index = $2
+        `,
+        [
+          `migration-temp-${block.index}-${Date.now()}`,
+
+          block.index
+        ]
+      );
+    }
+
+    /*
+      Puis on écrit les nouveaux blocs.
+    */
+
+    for (
+      const block
+      of migratedChain
+    ) {
+      await client.query(
+        `
+        UPDATE koa_blocks
+        SET
+          previous_hash = $1,
+          hash = $2,
+          nonce = $3,
+          transactions = $4::jsonb
+        WHERE block_index = $5
+        `,
+        [
+          block.previousHash,
+
+          block.hash,
+
+          block.nonce,
+
+          JSON.stringify(
+            canonicalTransactions(
+              block.transactions
+            )
+          ),
+
+          block.index
+        ]
+      );
+    }
+
+    /*
+      On calcule le total directement
+      depuis les récompenses existantes.
+
+      Les 50 KOA du bloc #1 restent donc
+      exactement les mêmes.
+    */
+
+    let totalMined = 0;
+
+    for (
+      const block
+      of migratedChain
+    ) {
+      for (
+        const tx
+        of block.transactions
+      ) {
+        if (
+          tx.fromAddress ===
+          null
+        ) {
+          totalMined +=
+            Number(
+              tx.amount
+            );
+        }
+      }
+    }
+
+    const oldState =
+      await getStoredState(
+        client
+      );
+
+    const pendingTransactions =
+      Array.isArray(
+        oldState
+          .pendingTransactions
+      )
+        ? oldState
+            .pendingTransactions
+        : [];
+
+    await client.query(
+      `
+      INSERT INTO koa_state (
+        key,
+        value,
+        updated_at
+      )
+      VALUES (
+        'blockchain',
+        $1::jsonb,
+        NOW()
+      )
+      ON CONFLICT (key)
+      DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = NOW()
+      `,
+      [
+        JSON.stringify({
+          hashFormat:
+            HASH_FORMAT_VERSION,
+
+          totalMined,
+
+          pendingTransactions
+        })
+      ]
+    );
+
+    await client.query(
+      "COMMIT"
+    );
+
+    console.log(
+      "Migration blockchain : OK"
+    );
+
+    console.log(
+      `Blocs migrés : ${migratedChain.length}`
+    );
+
+    console.log(
+      `KOA conservés : ${totalMined}`
+    );
+
+  } catch (error) {
+    await client.query(
+      "ROLLBACK"
+    );
+
+    console.error(
+      "Erreur migration blockchain :",
+      error
+    );
+
+    throw error;
+
+  } finally {
+    client.release();
+  }
+}
+
+// ============================================================
+// VÉRIFICATION DU FORMAT DE HASH
+// ============================================================
+
+async function ensureHashFormat() {
+  const blocks =
+    await pool.query(`
+      SELECT COUNT(*)::integer AS count
+      FROM koa_blocks
+    `);
+
+  const blockCount =
+    Number(
+      blocks.rows[0].count
+    );
+
+  /*
+    Nouvelle blockchain vide :
+    aucune migration nécessaire.
+  */
+
+  if (
+    blockCount === 0
+  ) {
+    return;
+  }
+
+  const state =
+    await getStoredState();
+
+  const hashFormat =
+    Number(
+      state.hashFormat || 1
+    );
+
+  console.log(
+    `Format hash PostgreSQL : ${hashFormat}`
+  );
+
+  if (
+    hashFormat <
+    HASH_FORMAT_VERSION
+  ) {
+    await migrateHashFormat();
+  }
+}
+
+// ============================================================
 // RESTAURATION BLOCKCHAIN
 // ============================================================
 
@@ -313,17 +796,20 @@ async function restoreBlockchain() {
     `);
 
   // ----------------------------------------------------------
-  // Première installation
+  // PREMIÈRE INSTALLATION
   // ----------------------------------------------------------
 
   if (
-    result.rows.length === 0
+    result.rows.length ===
+    0
   ) {
+    console.log(
+      "Première installation KOA."
+    );
+
     await saveBlock(
       koala.chain[0]
     );
-
-    await saveState();
 
     console.log(
       "Bloc Genesis sauvegardé dans PostgreSQL."
@@ -333,156 +819,49 @@ async function restoreBlockchain() {
   }
 
   // ----------------------------------------------------------
-  // Reconstruction des blocs
+  // RECONSTRUCTION
   // ----------------------------------------------------------
 
   koala.chain =
     result.rows.map(
-      row => {
-        const transactions =
-          Array.isArray(
-            row.transactions
-          )
-            ? row.transactions
-            : [];
-
-        return {
-          index:
-            Number(
-              row.block_index
-            ),
-
-          timestamp:
-            Number(
-              row.timestamp
-            ),
-
-          transactions,
-
-          previousHash:
-            row.previous_hash,
-
-          nonce:
-            Number(
-              row.nonce
-            ),
-
-          hash:
-            row.hash,
-
-          calculateHash() {
-            return crypto
-              .createHash(
-                "sha256"
-              )
-              .update(
-                this.index +
-                this.previousHash +
-                this.timestamp +
-                JSON.stringify(
-                  this.transactions
-                ) +
-                this.nonce
-              )
-              .digest(
-                "hex"
-              );
-          },
-
-          hasValidTransactions() {
-            return this
-              .transactions
-              .every(
-                transaction => {
-                  const tx =
-                    Object.assign(
-                      new Transaction(),
-                      transaction
-                    );
-
-                  return tx.isValid();
-                }
-              );
-          }
-        };
-      }
+      row =>
+        blockFromRow(
+          row
+        )
     );
 
   // ----------------------------------------------------------
-  // Restauration de l'état
+  // ÉTAT
   // ----------------------------------------------------------
 
-  const stateResult =
-    await pool.query(`
-      SELECT value
-      FROM koa_state
-      WHERE key = 'blockchain'
-      LIMIT 1
-    `);
+  const state =
+    await getStoredState();
 
-  if (
-    stateResult.rows.length
-  ) {
-    const state =
-      stateResult
-        .rows[0]
-        .value || {};
+  const totalFromChain =
+    calculateTotalMined();
 
-    koala.totalMined =
-      Number(
-        state.totalMined || 0
-      );
+  /*
+    La blockchain confirmée est la source
+    de vérité pour le nombre de KOA créés.
+  */
 
-    koala.pendingTransactions =
-      Array.isArray(
-        state.pendingTransactions
-      )
-        ? state
-            .pendingTransactions
-            .map(
-              transaction =>
-                Object.assign(
-                  new Transaction(),
-                  transaction
-                )
-            )
-        : [];
+  koala.totalMined =
+    totalFromChain;
 
-  } else {
-    /*
-      Si koa_state n'existe pas,
-      on reconstruit le nombre de KOA
-      créés à partir des récompenses
-      de minage.
-    */
-
-    let total = 0;
-
-    for (
-      const block
-      of koala.chain
-    ) {
-      for (
-        const tx
-        of block.transactions
-      ) {
-        if (
-          tx.fromAddress === null
-        ) {
-          total +=
-            Number(
-              tx.amount
-            );
-        }
-      }
-    }
-
-    koala.totalMined =
-      total;
-
-    koala.pendingTransactions =
-      [];
-  }
+  koala.pendingTransactions =
+    Array.isArray(
+      state.pendingTransactions
+    )
+      ? state
+          .pendingTransactions
+          .map(
+            transaction =>
+              Object.assign(
+                new Transaction(),
+                transaction
+              )
+          )
+      : [];
 
   console.log(
     `Blockchain restaurée : ${koala.chain.length} blocs`
@@ -552,6 +931,9 @@ app.get(
           .pendingTransactions
           .length,
 
+      hashFormat:
+        HASH_FORMAT_VERSION,
+
       valid:
         koala.isChainValid()
     });
@@ -580,7 +962,11 @@ app.get(
       );
 
     const block =
-      koala.chain[index];
+      koala.chain.find(
+        item =>
+          item.index ===
+          index
+      );
 
     if (!block) {
       return res
@@ -599,14 +985,6 @@ app.get(
 
 // ============================================================
 // CRÉATION WALLET
-//
-// TEMPORAIRE.
-//
-// Cette route existe encore pour compatibilité avec
-// l'ancienne interface.
-//
-// La prochaine interface créera le portefeuille
-// directement sur l'appareil.
 // ============================================================
 
 app.post(
@@ -707,21 +1085,6 @@ app.get(
 
 // ============================================================
 // TRANSACTION SIGNÉE
-//
-// IMPORTANT :
-//
-// LA CLÉ PRIVÉE N'EST PAS ACCEPTÉE PAR CETTE ROUTE.
-//
-// Le client doit envoyer :
-//
-// fromAddress
-// toAddress
-// amount
-// publicKey
-// timestamp
-// signature
-//
-// Le serveur vérifie ensuite la signature.
 // ============================================================
 
 app.post(
@@ -736,10 +1099,6 @@ app.post(
         timestamp,
         signature
       } = req.body;
-
-      // ------------------------------------------------------
-      // DONNÉES OBLIGATOIRES
-      // ------------------------------------------------------
 
       if (
         !fromAddress ||
@@ -769,10 +1128,6 @@ app.post(
           timestamp
         );
 
-      // ------------------------------------------------------
-      // MONTANT
-      // ------------------------------------------------------
-
       if (
         !Number.isFinite(
           numericAmount
@@ -789,10 +1144,6 @@ app.post(
           });
       }
 
-      // ------------------------------------------------------
-      // TIMESTAMP
-      // ------------------------------------------------------
-
       if (
         !Number.isSafeInteger(
           numericTimestamp
@@ -808,13 +1159,6 @@ app.post(
               "Timestamp invalide."
           });
       }
-
-      /*
-        Le timestamp doit être proche
-        de l'heure actuelle.
-
-        Tolérance : 10 minutes.
-      */
 
       const now =
         Date.now();
@@ -839,10 +1183,6 @@ app.post(
           });
       }
 
-      // ------------------------------------------------------
-      // RECONSTRUCTION DE LA TRANSACTION
-      // ------------------------------------------------------
-
       const transaction =
         new Transaction(
           fromAddress,
@@ -851,22 +1191,11 @@ app.post(
           publicKey
         );
 
-      /*
-        IMPORTANT :
-
-        On remet exactement le timestamp
-        utilisé lors de la signature côté client.
-      */
-
       transaction.timestamp =
         numericTimestamp;
 
       transaction.signature =
         signature;
-
-      // ------------------------------------------------------
-      // VÉRIFICATION CRYPTOGRAPHIQUE
-      // ------------------------------------------------------
 
       if (
         !transaction.isValid()
@@ -881,28 +1210,11 @@ app.post(
           });
       }
 
-      /*
-        createTransaction vérifie ensuite :
-
-        - la signature
-        - le montant
-        - le solde
-        - les transactions déjà en attente
-      */
-
       koala.createTransaction(
         transaction
       );
 
-      // ------------------------------------------------------
-      // SAUVEGARDE DE LA TRANSACTION EN ATTENTE
-      // ------------------------------------------------------
-
       await saveState();
-
-      // ------------------------------------------------------
-      // RÉPONSE
-      // ------------------------------------------------------
 
       res
         .status(201)
@@ -1001,13 +1313,6 @@ app.post(
       } catch (
         databaseError
       ) {
-        /*
-          PostgreSQL a refusé le bloc.
-
-          On restaure donc l'état mémoire
-          précédent.
-        */
-
         koala.chain.pop();
 
         koala.pendingTransactions =
@@ -1059,7 +1364,7 @@ app.post(
 );
 
 // ============================================================
-// VALIDATION BLOCKCHAIN
+// VALIDATION
 // ============================================================
 
 app.get(
@@ -1067,7 +1372,10 @@ app.get(
   (req, res) => {
     res.json({
       valid:
-        koala.isChainValid()
+        koala.isChainValid(),
+
+      hashFormat:
+        HASH_FORMAT_VERSION
     });
   }
 );
@@ -1092,19 +1400,37 @@ async function start() {
 
     await createTables();
 
+    // --------------------------------------------------------
+    // MIGRATION UNE SEULE FOIS
+    // --------------------------------------------------------
+
+    await ensureHashFormat();
+
+    // --------------------------------------------------------
+    // RESTAURATION
+    // --------------------------------------------------------
+
     await restoreBlockchain();
 
     // --------------------------------------------------------
-    // VÉRIFICATION DE LA BLOCKCHAIN RESTAURÉE
+    // VALIDATION
     // --------------------------------------------------------
 
     if (
       !koala.isChainValid()
     ) {
       throw new Error(
-        "Blockchain PostgreSQL invalide."
+        "Blockchain PostgreSQL invalide après restauration."
       );
     }
+
+    /*
+      Réécrit l'état afin de garantir que
+      hashFormat et totalMined correspondent
+      à la blockchain restaurée.
+    */
+
+    await saveState();
 
     databaseReady =
       true;
@@ -1126,15 +1452,23 @@ async function start() {
         );
 
         console.log(
+          `Format hash : ${HASH_FORMAT_VERSION}`
+        );
+
+        console.log(
+          `Blocs : ${koala.chain.length}`
+        );
+
+        console.log(
+          `KOA créés : ${koala.totalMined}`
+        );
+
+        console.log(
           "Wallet cryptographique : OK"
         );
 
         console.log(
           "Signatures secp256k1 : OK"
-        );
-
-        console.log(
-          "Bibliothèque navigateur secp256k1 : OK"
         );
 
         console.log(
