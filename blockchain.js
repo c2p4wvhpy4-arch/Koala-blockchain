@@ -7,7 +7,7 @@ const crypto = require("crypto");
 function sha256(data) {
   return crypto
     .createHash("sha256")
-    .update(data)
+    .update(String(data))
     .digest("hex");
 }
 
@@ -15,6 +15,67 @@ function isHex(value) {
   return (
     typeof value === "string" &&
     /^[0-9a-fA-F]+$/.test(value)
+  );
+}
+
+// ============================================================
+// SÉRIALISATION DÉTERMINISTE
+//
+// IMPORTANT :
+// PostgreSQL JSONB peut restituer les propriétés JSON dans un
+// ordre différent.
+//
+// On ne dépend donc plus de l'ordre des propriétés d'un objet.
+// ============================================================
+
+function canonicalTransaction(transaction) {
+  return {
+    fromAddress:
+      transaction.fromAddress === undefined
+        ? null
+        : transaction.fromAddress,
+
+    toAddress:
+      transaction.toAddress === undefined
+        ? null
+        : transaction.toAddress,
+
+    amount:
+      Number(transaction.amount),
+
+    publicKey:
+      transaction.publicKey === undefined
+        ? null
+        : transaction.publicKey,
+
+    timestamp:
+      Number(transaction.timestamp),
+
+    signature:
+      transaction.signature === undefined
+        ? null
+        : transaction.signature
+  };
+}
+
+function canonicalTransactions(transactions) {
+  if (!Array.isArray(transactions)) {
+    return [];
+  }
+
+  return transactions.map(
+    transaction =>
+      canonicalTransaction(
+        transaction
+      )
+  );
+}
+
+function serializeTransactions(transactions) {
+  return JSON.stringify(
+    canonicalTransactions(
+      transactions
+    )
   );
 }
 
@@ -115,15 +176,6 @@ function publicKeyHexToKeyObject(
       );
   }
 
-  /*
-    Node peut convertir directement
-    une clé EC brute grâce à
-    ECDH.convertKey.
-
-    On la convertit d'abord en
-    clé non compressée.
-  */
-
   const uncompressed =
     crypto.ECDH.convertKey(
       Buffer.from(
@@ -135,16 +187,6 @@ function publicKeyHexToKeyObject(
       undefined,
       "uncompressed"
     );
-
-  /*
-    Structure SPKI DER pour secp256k1.
-
-    Préfixe :
-    3056301006072a8648ce3d020106052b8104000a034200
-
-    Puis clé publique non compressée
-    de 65 octets.
-  */
 
   const spkiPrefix =
     Buffer.from(
@@ -166,10 +208,7 @@ function publicKeyHexToKeyObject(
 }
 
 // ============================================================
-// PORTEFEUILLE SERVEUR
-//
-// Conservé temporairement pour compatibilité.
-// Le nouveau portefeuille sera créé côté appareil.
+// PORTEFEUILLE
 // ============================================================
 
 function createWallet() {
@@ -243,9 +282,9 @@ class Transaction {
       null;
   }
 
-  // ----------------------------------------------------------
-  // HASH À SIGNER
-  // ----------------------------------------------------------
+  // ==========================================================
+  // HASH DE TRANSACTION
+  // ==========================================================
 
   calculateHash() {
     return sha256(
@@ -264,12 +303,9 @@ class Transaction {
     );
   }
 
-  // ----------------------------------------------------------
-  // SIGNATURE SERVEUR
-  //
-  // Conservée uniquement pour compatibilité/tests.
-  // Le nouveau navigateur ne l'utilisera pas.
-  // ----------------------------------------------------------
+  // ==========================================================
+  // SIGNATURE
+  // ==========================================================
 
   signTransaction(
     privateKey
@@ -323,20 +359,28 @@ class Transaction {
     return this.signature;
   }
 
-  // ----------------------------------------------------------
-  // VALIDATION
-  // ----------------------------------------------------------
+  // ==========================================================
+  // VALIDATION TRANSACTION
+  // ==========================================================
 
   isValid() {
     /*
-      Une récompense minière
-      n'a pas d'expéditeur.
+      Récompense minière :
+      pas d'expéditeur et pas de signature.
     */
 
     if (
       this.fromAddress === null
     ) {
-      return true;
+      return (
+        typeof this.toAddress ===
+          "string" &&
+        this.toAddress.length > 0 &&
+        Number.isFinite(
+          Number(this.amount)
+        ) &&
+        Number(this.amount) > 0
+      );
     }
 
     if (
@@ -345,9 +389,6 @@ class Transaction {
     ) {
       return false;
     }
-
-    // Vérifie que la clé appartient
-    // bien à l'adresse KOA.
 
     let expectedAddress;
 
@@ -370,7 +411,6 @@ class Transaction {
     try {
       let publicKeyObject;
 
-      // Ancienne clé PEM
       if (
         this.publicKey.includes(
           "BEGIN PUBLIC KEY"
@@ -378,10 +418,7 @@ class Transaction {
       ) {
         publicKeyObject =
           this.publicKey;
-      }
-
-      // Nouvelle clé hex secp256k1
-      else {
+      } else {
         publicKeyObject =
           publicKeyHexToKeyObject(
             this.publicKey
@@ -428,13 +465,15 @@ class Block {
     previousHash = ""
   ) {
     this.index =
-      index;
+      Number(index);
 
     this.timestamp =
-      timestamp;
+      Number(timestamp);
 
     this.transactions =
-      transactions;
+      canonicalTransactions(
+        transactions
+      );
 
     this.previousHash =
       previousHash;
@@ -446,17 +485,25 @@ class Block {
       this.calculateHash();
   }
 
+  // ==========================================================
+  // HASH DÉTERMINISTE
+  // ==========================================================
+
   calculateHash() {
     return sha256(
-      this.index +
-      this.previousHash +
-      this.timestamp +
-      JSON.stringify(
+      String(this.index) +
+      String(this.previousHash) +
+      String(this.timestamp) +
+      serializeTransactions(
         this.transactions
       ) +
-      this.nonce
+      String(this.nonce)
     );
   }
+
+  // ==========================================================
+  // MINAGE
+  // ==========================================================
 
   mineBlock(
     difficulty
@@ -482,6 +529,10 @@ class Block {
       `Bloc #${this.index} miné : ${this.hash}`
     );
   }
+
+  // ==========================================================
+  // VALIDATION DES TRANSACTIONS
+  // ==========================================================
 
   hasValidTransactions() {
     return this
@@ -569,14 +620,23 @@ class KoalaBlockchain {
 
     if (
       !Number.isFinite(
-        transaction.amount
+        Number(
+          transaction.amount
+        )
       ) ||
-      transaction.amount <= 0
+      Number(
+        transaction.amount
+      ) <= 0
     ) {
       throw new Error(
         "Montant invalide."
       );
     }
+
+    transaction.amount =
+      Number(
+        transaction.amount
+      );
 
     if (
       !transaction.isValid()
@@ -634,7 +694,9 @@ class KoalaBlockchain {
     minerAddress
   ) {
     if (
-      !minerAddress
+      !minerAddress ||
+      typeof minerAddress !==
+        "string"
     ) {
       throw new Error(
         "Adresse du mineur obligatoire."
@@ -784,6 +846,19 @@ class KoalaBlockchain {
   // ==========================================================
 
   isChainValid() {
+    if (
+      !Array.isArray(
+        this.chain
+      ) ||
+      this.chain.length === 0
+    ) {
+      console.error(
+        "Blockchain vide."
+      );
+
+      return false;
+    }
+
     for (
       let i = 1;
       i < this.chain.length;
@@ -796,10 +871,6 @@ class KoalaBlockchain {
         this.chain[
           i - 1
         ];
-
-      // ------------------------------------------------------
-      // HASH DU BLOC
-      // ------------------------------------------------------
 
       const recalculatedHash =
         currentBlock
@@ -826,10 +897,6 @@ class KoalaBlockchain {
         return false;
       }
 
-      // ------------------------------------------------------
-      // LIEN AVEC LE BLOC PRÉCÉDENT
-      // ------------------------------------------------------
-
       if (
         currentBlock.previousHash !==
         previousBlock.hash
@@ -850,10 +917,6 @@ class KoalaBlockchain {
 
         return false;
       }
-
-      // ------------------------------------------------------
-      // TRANSACTIONS
-      // ------------------------------------------------------
 
       if (
         !currentBlock
@@ -882,7 +945,11 @@ class KoalaBlockchain {
 module.exports = {
   KoalaBlockchain,
   Transaction,
+  Block,
   createWallet,
   addressFromPublicKey,
-  publicKeyHexToKeyObject
+  publicKeyHexToKeyObject,
+  canonicalTransaction,
+  canonicalTransactions,
+  serializeTransactions
 };
