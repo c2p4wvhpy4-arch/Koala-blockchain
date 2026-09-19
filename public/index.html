@@ -329,6 +329,20 @@ input {
     12px;
 }
 
+#importWalletArea {
+  margin-top:
+    15px;
+
+  padding:
+    15px;
+
+  background:
+    #f9fafb;
+
+  border-radius:
+    12px;
+}
+
 </style>
 
 </head>
@@ -392,6 +406,50 @@ Aucun portefeuille chargé.
 >
 Créer un portefeuille KOA
 </button>
+
+<button
+  class="secondary"
+  id="importWalletButton"
+  onclick="showImportWallet()"
+>
+Importer un portefeuille KOA
+</button>
+
+<div
+  id="importWalletArea"
+  style="display:none"
+>
+
+<div class="small">
+Clé privée du portefeuille
+</div>
+
+<input
+  id="importPrivateKey"
+  type="password"
+  placeholder="Clé privée KOA"
+  autocomplete="off"
+  autocapitalize="off"
+  spellcheck="false"
+>
+
+<button
+  onclick="importWallet()"
+>
+Importer le portefeuille
+</button>
+
+<button
+  class="secondary"
+  onclick="cancelImportWallet()"
+>
+Annuler
+</button>
+
+<p id="importWalletResult">
+</p>
+
+</div>
 
 <button
   class="secondary"
@@ -483,6 +541,8 @@ Destinataire
 <input
   id="to"
   placeholder="Adresse KOA du destinataire"
+  autocapitalize="off"
+  spellcheck="false"
 >
 
 <div class="small">
@@ -545,6 +605,7 @@ const WALLET_STORAGE_KEY =
 // ============================================================
 
 function bytesToHex(bytes) {
+
   return Array
     .from(bytes)
     .map(
@@ -557,10 +618,12 @@ function bytesToHex(bytes) {
 }
 
 function hexToBytes(hex) {
+
   if (
     typeof hex !== "string" ||
     hex.length % 2 !== 0
   ) {
+
     throw new Error(
       "Donnée hexadécimale invalide."
     );
@@ -576,7 +639,8 @@ function hexToBytes(hex) {
     i < bytes.length;
     i++
   ) {
-    bytes[i] =
+
+    const value =
       parseInt(
         hex.slice(
           i * 2,
@@ -584,6 +648,20 @@ function hexToBytes(hex) {
         ),
         16
       );
+
+    if (
+      Number.isNaN(
+        value
+      )
+    ) {
+
+      throw new Error(
+        "Donnée hexadécimale invalide."
+      );
+    }
+
+    bytes[i] =
+      value;
   }
 
   return bytes;
@@ -596,6 +674,7 @@ function hexToBytes(hex) {
 async function sha256Hex(
   value
 ) {
+
   const encoded =
     new TextEncoder()
       .encode(
@@ -619,16 +698,12 @@ async function sha256Hex(
 
 // ============================================================
 // ADRESSE KOA
-//
-// Même méthode que blockchain.js :
-//
-// KOA_ + 40 premiers caractères
-// du SHA256 de la clé publique hex.
 // ============================================================
 
 async function addressFromPublicKey(
   publicKeyHex
 ) {
+
   const normalized =
     publicKeyHex
       .trim()
@@ -650,31 +725,33 @@ async function addressFromPublicKey(
 
 // ============================================================
 // SIGNATURE COMPACTE -> DER
-//
-// @noble/secp256k1 produit une signature ECDSA compacte.
-// Node crypto.verify utilise ici une signature DER.
-//
-// Cette fonction convertit r || s vers DER.
 // ============================================================
 
 function compactSignatureToDer(
   compact
 ) {
+
   let bytes;
 
   if (
     compact instanceof
     Uint8Array
   ) {
-    bytes = compact;
+
+    bytes =
+      compact;
+
   } else if (
     compact &&
     typeof compact.toBytes ===
       "function"
   ) {
+
     bytes =
       compact.toBytes();
+
   } else {
+
     throw new Error(
       "Format de signature inconnu."
     );
@@ -683,6 +760,7 @@ function compactSignatureToDer(
   if (
     bytes.length !== 64
   ) {
+
     throw new Error(
       "Signature secp256k1 invalide."
     );
@@ -709,6 +787,7 @@ function compactSignatureToDer(
     r[0] === 0 &&
     (r[1] & 0x80) === 0
   ) {
+
     r.shift();
   }
 
@@ -717,18 +796,21 @@ function compactSignatureToDer(
     s[0] === 0 &&
     (s[1] & 0x80) === 0
   ) {
+
     s.shift();
   }
 
   if (
     r[0] & 0x80
   ) {
+
     r.unshift(0);
   }
 
   if (
     s[0] & 0x80
   ) {
+
     s.unshift(0);
   }
 
@@ -761,19 +843,9 @@ window.createWallet =
 
     try {
 
-      /*
-        Génération locale d'une clé privée
-        secp256k1 de 32 octets.
-      */
-
       const privateKey =
         secp.utils
           .randomSecretKey();
-
-      /*
-        Clé publique compressée :
-        33 octets.
-      */
 
       const publicKey =
         secp.getPublicKey(
@@ -803,13 +875,6 @@ window.createWallet =
           privateKeyHex
       };
 
-      /*
-        Stockage local sur cet appareil.
-
-        IMPORTANT :
-        cette version est destinée au développement.
-      */
-
       localStorage.setItem(
         WALLET_STORAGE_KEY,
         JSON.stringify(
@@ -831,6 +896,167 @@ window.createWallet =
         "Impossible de créer le portefeuille : " +
         error.message
       );
+    }
+  };
+
+// ============================================================
+// IMPORTER UN PORTEFEUILLE
+// ============================================================
+
+window.showImportWallet =
+  function() {
+
+    document
+      .getElementById(
+        "importWalletArea"
+      )
+      .style
+      .display =
+        "block";
+  };
+
+window.cancelImportWallet =
+  function() {
+
+    document
+      .getElementById(
+        "importWalletArea"
+      )
+      .style
+      .display =
+        "none";
+
+    document
+      .getElementById(
+        "importPrivateKey"
+      )
+      .value =
+        "";
+
+    const result =
+      document
+        .getElementById(
+          "importWalletResult"
+        );
+
+    result.textContent =
+      "";
+
+    result.className =
+      "";
+  };
+
+window.importWallet =
+  async function() {
+
+    const resultElement =
+      document
+        .getElementById(
+          "importWalletResult"
+        );
+
+    try {
+
+      resultElement
+        .className =
+          "";
+
+      resultElement
+        .textContent =
+          "Vérification du portefeuille...";
+
+      const privateKeyHex =
+        document
+          .getElementById(
+            "importPrivateKey"
+          )
+          .value
+          .trim()
+          .toLowerCase();
+
+      if (
+        !/^[0-9a-f]{64}$/.test(
+          privateKeyHex
+        )
+      ) {
+
+        throw new Error(
+          "La clé privée doit contenir exactement 64 caractères hexadécimaux."
+        );
+      }
+
+      const privateKeyBytes =
+        hexToBytes(
+          privateKeyHex
+        );
+
+      const publicKey =
+        secp.getPublicKey(
+          privateKeyBytes
+        );
+
+      const publicKeyHex =
+        bytesToHex(
+          publicKey
+        );
+
+      const address =
+        await addressFromPublicKey(
+          publicKeyHex
+        );
+
+      wallet = {
+        address,
+        publicKey:
+          publicKeyHex,
+        privateKey:
+          privateKeyHex
+      };
+
+      localStorage.setItem(
+        WALLET_STORAGE_KEY,
+        JSON.stringify(
+          wallet
+        )
+      );
+
+      document
+        .getElementById(
+          "importPrivateKey"
+        )
+        .value =
+          "";
+
+      document
+        .getElementById(
+          "importWalletArea"
+        )
+        .style
+        .display =
+          "none";
+
+      resultElement
+        .textContent =
+          "";
+
+      showWallet();
+
+      await refreshBalance();
+
+    } catch (error) {
+
+      console.error(
+        "Erreur import wallet :",
+        error
+      );
+
+      resultElement
+        .textContent =
+          error.message;
+
+      resultElement
+        .className =
+          "error";
     }
   };
 
@@ -861,6 +1087,7 @@ function restoreWallet() {
       !parsed.publicKey ||
       !parsed.privateKey
     ) {
+
       localStorage.removeItem(
         WALLET_STORAGE_KEY
       );
@@ -957,6 +1184,22 @@ ${wallet.publicKey}
 
   document
     .getElementById(
+      "importWalletButton"
+    )
+    .style
+    .display =
+      "none";
+
+  document
+    .getElementById(
+      "importWalletArea"
+    )
+    .style
+    .display =
+      "none";
+
+  document
+    .getElementById(
       "privateButton"
     )
     .style
@@ -996,9 +1239,12 @@ window.togglePrivateKey =
       box.style.display ===
       "block"
     ) {
+
       box.style.display =
         "none";
+
     } else {
+
       box.style.display =
         "block";
     }
@@ -1052,6 +1298,13 @@ window.deleteWallet =
       .getElementById(
         "privateKeyBox"
       )
+      .textContent =
+        "";
+
+    document
+      .getElementById(
+        "privateKeyBox"
+      )
       .style
       .display =
         "none";
@@ -1079,6 +1332,29 @@ window.deleteWallet =
       .style
       .display =
         "block";
+
+    document
+      .getElementById(
+        "importWalletButton"
+      )
+      .style
+      .display =
+        "block";
+
+    document
+      .getElementById(
+        "importWalletArea"
+      )
+      .style
+      .display =
+        "none";
+
+    document
+      .getElementById(
+        "importPrivateKey"
+      )
+      .value =
+        "";
   };
 
 // ============================================================
@@ -1104,6 +1380,14 @@ async function refreshBalance() {
     const result =
       await response.json();
 
+    if (!response.ok) {
+
+      throw new Error(
+        result.error ||
+        "Impossible de récupérer le solde."
+      );
+    }
+
     const balanceElement =
       document
         .getElementById(
@@ -1113,6 +1397,7 @@ async function refreshBalance() {
     if (
       balanceElement
     ) {
+
       balanceElement
         .textContent =
           `${result.balance} KOA`;
@@ -1362,6 +1647,7 @@ window.mine =
         !response.ok ||
         !result.success
       ) {
+
         throw new Error(
           result.error ||
           "Erreur de minage."
@@ -1406,8 +1692,9 @@ window.sendTransaction =
     try {
 
       if (!wallet) {
+
         throw new Error(
-          "Crée d'abord un portefeuille KOA."
+          "Crée ou importe d'abord un portefeuille KOA."
         );
       }
 
@@ -1432,8 +1719,19 @@ window.sendTransaction =
         );
 
       if (!toAddress) {
+
         throw new Error(
           "Adresse destinataire obligatoire."
+        );
+      }
+
+      if (
+        toAddress ===
+        fromAddress
+      ) {
+
+        throw new Error(
+          "Le destinataire doit être différent de l'expéditeur."
         );
       }
 
@@ -1443,6 +1741,7 @@ window.sendTransaction =
         ) ||
         amount <= 0
       ) {
+
         throw new Error(
           "Montant KOA invalide."
         );
@@ -1450,12 +1749,6 @@ window.sendTransaction =
 
       const timestamp =
         Date.now();
-
-      /*
-        Doit correspondre exactement
-        à Transaction.calculateHash()
-        dans blockchain.js.
-      */
 
       const transactionText =
         String(
@@ -1470,16 +1763,6 @@ window.sendTransaction =
         String(
           timestamp
         );
-
-      /*
-        blockchain.js fait d'abord :
-        SHA256(transactionText)
-
-        puis crypto.sign("sha256", ASCII_DU_HASH)
-
-        Donc le navigateur calcule d'abord
-        le même hash hexadécimal.
-      */
 
       const transactionHash =
         await sha256Hex(
@@ -1497,25 +1780,11 @@ window.sendTransaction =
           wallet.privateKey
         );
 
-      /*
-        signAsync effectue l'ECDSA secp256k1.
-
-        Par défaut la bibliothèque applique
-        SHA-256 au message, ce qui correspond
-        au crypto.sign("sha256", ...)
-        utilisé par Node.
-      */
-
       const compactSignature =
         await secp.signAsync(
           message,
           privateKeyBytes
         );
-
-      /*
-        Conversion vers DER pour
-        crypto.verify côté serveur.
-      */
 
       const derSignature =
         compactSignatureToDer(
@@ -1536,10 +1805,8 @@ window.sendTransaction =
           "";
 
       /*
-        IMPORTANT :
-
-        privateKey n'est PAS présente
-        dans cet objet.
+        La clé privée n'est jamais envoyée
+        au serveur.
       */
 
       const response =
@@ -1564,6 +1831,7 @@ window.sendTransaction =
                   wallet.publicKey,
 
                 timestamp,
+
                 signature:
                   signatureHex
               })
@@ -1577,6 +1845,7 @@ window.sendTransaction =
         !response.ok ||
         !result.success
       ) {
+
         throw new Error(
           result.error ||
           "Transaction refusée."
