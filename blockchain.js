@@ -1,16 +1,156 @@
 const crypto = require("crypto");
 
+// ============================================================
+// OUTILS CRYPTOGRAPHIQUES
+// ============================================================
+
+function sha256(data) {
+  return crypto
+    .createHash("sha256")
+    .update(data)
+    .digest("hex");
+}
+
+function addressFromPublicKey(publicKey) {
+  return "KOA_" + sha256(publicKey).substring(0, 40);
+}
+
+// ============================================================
+// PORTEFEUILLE
+// ============================================================
+
+function createWallet() {
+  const {
+    publicKey,
+    privateKey
+  } = crypto.generateKeyPairSync("ec", {
+    namedCurve: "secp256k1",
+    publicKeyEncoding: {
+      type: "spki",
+      format: "pem"
+    },
+    privateKeyEncoding: {
+      type: "pkcs8",
+      format: "pem"
+    }
+  });
+
+  return {
+    address: addressFromPublicKey(publicKey),
+    publicKey,
+    privateKey
+  };
+}
+
+// ============================================================
+// TRANSACTION
+// ============================================================
+
 class Transaction {
-  constructor(fromAddress, toAddress, amount) {
+  constructor(
+    fromAddress,
+    toAddress,
+    amount,
+    publicKey = null
+  ) {
     this.fromAddress = fromAddress;
     this.toAddress = toAddress;
     this.amount = Number(amount);
+    this.publicKey = publicKey;
     this.timestamp = Date.now();
+    this.signature = null;
+  }
+
+  calculateHash() {
+    return sha256(
+      String(this.fromAddress) +
+      String(this.toAddress) +
+      String(this.amount) +
+      String(this.timestamp)
+    );
+  }
+
+  signTransaction(privateKey) {
+    if (!this.fromAddress) {
+      throw new Error(
+        "Une récompense minière ne doit pas être signée."
+      );
+    }
+
+    if (!this.publicKey) {
+      throw new Error(
+        "Clé publique manquante."
+      );
+    }
+
+    const expectedAddress =
+      addressFromPublicKey(this.publicKey);
+
+    if (expectedAddress !== this.fromAddress) {
+      throw new Error(
+        "La clé publique ne correspond pas à l'adresse."
+      );
+    }
+
+    const signature = crypto.sign(
+      "sha256",
+      Buffer.from(this.calculateHash()),
+      privateKey
+    );
+
+    this.signature =
+      signature.toString("hex");
+
+    return this.signature;
+  }
+
+  isValid() {
+    // Récompense du réseau
+    if (this.fromAddress === null) {
+      return true;
+    }
+
+    if (
+      !this.signature ||
+      !this.publicKey
+    ) {
+      return false;
+    }
+
+    if (
+      addressFromPublicKey(this.publicKey) !==
+      this.fromAddress
+    ) {
+      return false;
+    }
+
+    try {
+      return crypto.verify(
+        "sha256",
+        Buffer.from(this.calculateHash()),
+        this.publicKey,
+        Buffer.from(
+          this.signature,
+          "hex"
+        )
+      );
+    } catch {
+      return false;
+    }
   }
 }
 
+// ============================================================
+// BLOC
+// ============================================================
+
 class Block {
-  constructor(index, timestamp, transactions, previousHash = "") {
+  constructor(
+    index,
+    timestamp,
+    transactions,
+    previousHash = ""
+  ) {
     this.index = index;
     this.timestamp = timestamp;
     this.transactions = transactions;
@@ -21,38 +161,62 @@ class Block {
   }
 
   calculateHash() {
-    return crypto
-      .createHash("sha256")
-      .update(
-        this.index +
-          this.previousHash +
-          this.timestamp +
-          JSON.stringify(this.transactions) +
-          this.nonce
-      )
-      .digest("hex");
+    return sha256(
+      this.index +
+      this.previousHash +
+      this.timestamp +
+      JSON.stringify(this.transactions) +
+      this.nonce
+    );
   }
 
   mineBlock(difficulty) {
-    const target = Array(difficulty + 1).join("0");
+    const target =
+      "0".repeat(difficulty);
 
     while (
-      this.hash.substring(0, difficulty) !== target
+      this.hash.substring(
+        0,
+        difficulty
+      ) !== target
     ) {
       this.nonce++;
-      this.hash = this.calculateHash();
+
+      this.hash =
+        this.calculateHash();
     }
 
     console.log(
       `Bloc #${this.index} miné : ${this.hash}`
     );
   }
+
+  hasValidTransactions() {
+    return this.transactions.every(
+      transaction => {
+        const tx =
+          Object.assign(
+            new Transaction(),
+            transaction
+          );
+
+        return tx.isValid();
+      }
+    );
+  }
 }
+
+// ============================================================
+// BLOCKCHAIN KOALA
+// ============================================================
 
 class KoalaBlockchain {
   constructor() {
-    this.name = "Koala Blockchain";
-    this.symbol = "KOA";
+    this.name =
+      "Koala Blockchain";
+
+    this.symbol =
+      "KOA";
 
     this.chain = [
       this.createGenesisBlock()
@@ -64,7 +228,8 @@ class KoalaBlockchain {
 
     this.miningReward = 50;
 
-    this.maxSupply = 21000000;
+    this.maxSupply =
+      21000000;
 
     this.totalMined = 0;
   }
@@ -85,14 +250,19 @@ class KoalaBlockchain {
   }
 
   createTransaction(transaction) {
-    if (!transaction.toAddress) {
+    if (
+      !transaction.fromAddress ||
+      !transaction.toAddress
+    ) {
       throw new Error(
-        "Adresse destinataire obligatoire."
+        "Adresse expéditeur et destinataire obligatoires."
       );
     }
 
     if (
-      !Number.isFinite(transaction.amount) ||
+      !Number.isFinite(
+        transaction.amount
+      ) ||
       transaction.amount <= 0
     ) {
       throw new Error(
@@ -100,33 +270,38 @@ class KoalaBlockchain {
       );
     }
 
-    if (transaction.fromAddress) {
-      const balance =
-        this.getBalanceOfAddress(
-          transaction.fromAddress
+    if (!transaction.isValid()) {
+      throw new Error(
+        "Signature de transaction invalide."
+      );
+    }
+
+    const balance =
+      this.getBalanceOfAddress(
+        transaction.fromAddress
+      );
+
+    const pending =
+      this.pendingTransactions
+        .filter(
+          tx =>
+            tx.fromAddress ===
+            transaction.fromAddress
+        )
+        .reduce(
+          (total, tx) =>
+            total +
+            Number(tx.amount),
+          0
         );
 
-      const pending =
-        this.pendingTransactions
-          .filter(
-            tx =>
-              tx.fromAddress ===
-              transaction.fromAddress
-          )
-          .reduce(
-            (sum, tx) =>
-              sum + Number(tx.amount),
-            0
-          );
-
-      if (
-        balance - pending <
-        transaction.amount
-      ) {
-        throw new Error(
-          "Solde KOA insuffisant."
-        );
-      }
+    if (
+      balance - pending <
+      transaction.amount
+    ) {
+      throw new Error(
+        "Solde KOA insuffisant."
+      );
     }
 
     this.pendingTransactions.push(
@@ -150,15 +325,37 @@ class KoalaBlockchain {
       this.maxSupply
     ) {
       throw new Error(
-        "La quantité maximale de KOA a été atteinte."
+        "Quantité maximale de KOA atteinte."
       );
     }
+
+    const reward =
+      Math.min(
+        this.miningReward,
+        this.maxSupply -
+          this.totalMined
+      );
+
+    // La récompense est incluse directement
+    // dans le bloc qui vient d'être miné.
+    const rewardTransaction =
+      new Transaction(
+        null,
+        minerAddress,
+        reward
+      );
+
+    const transactions =
+      [
+        ...this.pendingTransactions,
+        rewardTransaction
+      ];
 
     const block =
       new Block(
         this.chain.length,
         Date.now(),
-        this.pendingTransactions,
+        transactions,
         this.getLatestBlock().hash
       );
 
@@ -168,22 +365,9 @@ class KoalaBlockchain {
 
     this.chain.push(block);
 
-    const reward =
-      Math.min(
-        this.miningReward,
-        this.maxSupply -
-          this.totalMined
-      );
-
     this.totalMined += reward;
 
-    this.pendingTransactions = [
-      new Transaction(
-        null,
-        minerAddress,
-        reward
-      )
-    ];
+    this.pendingTransactions = [];
 
     return {
       block,
@@ -194,7 +378,10 @@ class KoalaBlockchain {
   getBalanceOfAddress(address) {
     let balance = 0;
 
-    for (const block of this.chain) {
+    for (
+      const block
+      of this.chain
+    ) {
       for (
         const transaction
         of block.transactions
@@ -229,7 +416,10 @@ class KoalaBlockchain {
   ) {
     const transactions = [];
 
-    for (const block of this.chain) {
+    for (
+      const block
+      of this.chain
+    ) {
       for (
         const transaction
         of block.transactions
@@ -243,6 +433,7 @@ class KoalaBlockchain {
           transactions.push({
             block:
               block.index,
+
             ...transaction
           });
         }
@@ -277,6 +468,13 @@ class KoalaBlockchain {
       ) {
         return false;
       }
+
+      if (
+        !currentBlock
+          .hasValidTransactions()
+      ) {
+        return false;
+      }
     }
 
     return true;
@@ -285,5 +483,7 @@ class KoalaBlockchain {
 
 module.exports = {
   KoalaBlockchain,
-  Transaction
+  Transaction,
+  createWallet,
+  addressFromPublicKey
 };
