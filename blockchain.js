@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 
 // ============================================================
-// OUTILS CRYPTOGRAPHIQUES
+// OUTILS
 // ============================================================
 
 function sha256(data) {
@@ -11,33 +11,204 @@ function sha256(data) {
     .digest("hex");
 }
 
-function addressFromPublicKey(publicKey) {
-  return "KOA_" + sha256(publicKey).substring(0, 40);
+function isHex(value) {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-fA-F]+$/.test(value)
+  );
 }
 
 // ============================================================
-// PORTEFEUILLE
+// CLÉ PUBLIQUE
+// ============================================================
+
+function normalizePublicKey(publicKey) {
+  if (
+    typeof publicKey !== "string" ||
+    !publicKey.trim()
+  ) {
+    throw new Error(
+      "Clé publique invalide."
+    );
+  }
+
+  const key =
+    publicKey.trim();
+
+  // Ancien format PEM
+  if (
+    key.includes(
+      "BEGIN PUBLIC KEY"
+    )
+  ) {
+    return key;
+  }
+
+  // Nouveau format secp256k1 hex
+  if (!isHex(key)) {
+    throw new Error(
+      "Format de clé publique invalide."
+    );
+  }
+
+  /*
+    secp256k1 :
+
+    33 octets compressés = 66 caractères hex
+    65 octets non compressés = 130 caractères hex
+  */
+
+  if (
+    key.length !== 66 &&
+    key.length !== 130
+  ) {
+    throw new Error(
+      "Longueur de clé publique secp256k1 invalide."
+    );
+  }
+
+  return key.toLowerCase();
+}
+
+// ============================================================
+// ADRESSE KOA
+// ============================================================
+
+function addressFromPublicKey(
+  publicKey
+) {
+  const normalized =
+    normalizePublicKey(
+      publicKey
+    );
+
+  return (
+    "KOA_" +
+    sha256(normalized)
+      .substring(
+        0,
+        40
+      )
+  );
+}
+
+// ============================================================
+// CONVERSION CLÉ HEX -> KEYOBJECT NODE
+// ============================================================
+
+function publicKeyHexToKeyObject(
+  publicKeyHex
+) {
+  const normalized =
+    normalizePublicKey(
+      publicKeyHex
+    );
+
+  if (
+    normalized.includes(
+      "BEGIN PUBLIC KEY"
+    )
+  ) {
+    return crypto
+      .createPublicKey(
+        normalized
+      );
+  }
+
+  /*
+    Node peut convertir directement
+    une clé EC brute grâce à
+    ECDH.convertKey.
+
+    On la convertit d'abord en
+    clé non compressée.
+  */
+
+  const uncompressed =
+    crypto.ECDH.convertKey(
+      Buffer.from(
+        normalized,
+        "hex"
+      ),
+      "secp256k1",
+      undefined,
+      undefined,
+      "uncompressed"
+    );
+
+  /*
+    Structure SPKI DER pour secp256k1.
+
+    Préfixe :
+    3056301006072a8648ce3d020106052b8104000a034200
+
+    Puis clé publique non compressée
+    de 65 octets.
+  */
+
+  const spkiPrefix =
+    Buffer.from(
+      "3056301006072a8648ce3d020106052b8104000a034200",
+      "hex"
+    );
+
+  const der =
+    Buffer.concat([
+      spkiPrefix,
+      uncompressed
+    ]);
+
+  return crypto.createPublicKey({
+    key: der,
+    format: "der",
+    type: "spki"
+  });
+}
+
+// ============================================================
+// PORTEFEUILLE SERVEUR
+//
+// Conservé temporairement pour compatibilité.
+// Le nouveau portefeuille sera créé côté appareil.
 // ============================================================
 
 function createWallet() {
   const {
     publicKey,
     privateKey
-  } = crypto.generateKeyPairSync("ec", {
-    namedCurve: "secp256k1",
-    publicKeyEncoding: {
-      type: "spki",
-      format: "pem"
-    },
-    privateKeyEncoding: {
-      type: "pkcs8",
-      format: "pem"
-    }
-  });
+  } =
+    crypto.generateKeyPairSync(
+      "ec",
+      {
+        namedCurve:
+          "secp256k1",
+
+        publicKeyEncoding: {
+          type:
+            "spki",
+
+          format:
+            "pem"
+        },
+
+        privateKeyEncoding: {
+          type:
+            "pkcs8",
+
+          format:
+            "pem"
+        }
+      }
+    );
 
   return {
-    address: addressFromPublicKey(publicKey),
+    address:
+      addressFromPublicKey(
+        publicKey
+      ),
+
     publicKey,
+
     privateKey
   };
 }
@@ -53,60 +224,118 @@ class Transaction {
     amount,
     publicKey = null
   ) {
-    this.fromAddress = fromAddress;
-    this.toAddress = toAddress;
-    this.amount = Number(amount);
-    this.publicKey = publicKey;
-    this.timestamp = Date.now();
-    this.signature = null;
+    this.fromAddress =
+      fromAddress;
+
+    this.toAddress =
+      toAddress;
+
+    this.amount =
+      Number(amount);
+
+    this.publicKey =
+      publicKey;
+
+    this.timestamp =
+      Date.now();
+
+    this.signature =
+      null;
   }
+
+  // ----------------------------------------------------------
+  // HASH À SIGNER
+  // ----------------------------------------------------------
 
   calculateHash() {
     return sha256(
-      String(this.fromAddress) +
-      String(this.toAddress) +
-      String(this.amount) +
-      String(this.timestamp)
+      String(
+        this.fromAddress
+      ) +
+      String(
+        this.toAddress
+      ) +
+      String(
+        this.amount
+      ) +
+      String(
+        this.timestamp
+      )
     );
   }
 
-  signTransaction(privateKey) {
-    if (!this.fromAddress) {
+  // ----------------------------------------------------------
+  // SIGNATURE SERVEUR
+  //
+  // Conservée uniquement pour compatibilité/tests.
+  // Le nouveau navigateur ne l'utilisera pas.
+  // ----------------------------------------------------------
+
+  signTransaction(
+    privateKey
+  ) {
+    if (
+      !this.fromAddress
+    ) {
       throw new Error(
         "Une récompense minière ne doit pas être signée."
       );
     }
 
-    if (!this.publicKey) {
+    if (
+      !this.publicKey
+    ) {
       throw new Error(
         "Clé publique manquante."
       );
     }
 
     const expectedAddress =
-      addressFromPublicKey(this.publicKey);
+      addressFromPublicKey(
+        this.publicKey
+      );
 
-    if (expectedAddress !== this.fromAddress) {
+    if (
+      expectedAddress !==
+      this.fromAddress
+    ) {
       throw new Error(
         "La clé publique ne correspond pas à l'adresse."
       );
     }
 
-    const signature = crypto.sign(
-      "sha256",
-      Buffer.from(this.calculateHash()),
-      privateKey
-    );
+    const signature =
+      crypto.sign(
+        "sha256",
+
+        Buffer.from(
+          this.calculateHash()
+        ),
+
+        privateKey
+      );
 
     this.signature =
-      signature.toString("hex");
+      signature.toString(
+        "hex"
+      );
 
     return this.signature;
   }
 
+  // ----------------------------------------------------------
+  // VALIDATION
+  // ----------------------------------------------------------
+
   isValid() {
-    // Récompense du réseau
-    if (this.fromAddress === null) {
+    /*
+      Une récompense minière
+      n'a pas d'expéditeur.
+    */
+
+    if (
+      this.fromAddress === null
+    ) {
       return true;
     }
 
@@ -117,24 +346,71 @@ class Transaction {
       return false;
     }
 
+    // Vérifie que la clé appartient
+    // bien à l'adresse KOA.
+
+    let expectedAddress;
+
+    try {
+      expectedAddress =
+        addressFromPublicKey(
+          this.publicKey
+        );
+    } catch {
+      return false;
+    }
+
     if (
-      addressFromPublicKey(this.publicKey) !==
+      expectedAddress !==
       this.fromAddress
     ) {
       return false;
     }
 
     try {
+      let publicKeyObject;
+
+      // Ancienne clé PEM
+      if (
+        this.publicKey.includes(
+          "BEGIN PUBLIC KEY"
+        )
+      ) {
+        publicKeyObject =
+          this.publicKey;
+      }
+
+      // Nouvelle clé hex secp256k1
+      else {
+        publicKeyObject =
+          publicKeyHexToKeyObject(
+            this.publicKey
+          );
+      }
+
       return crypto.verify(
         "sha256",
-        Buffer.from(this.calculateHash()),
-        this.publicKey,
+
+        Buffer.from(
+          this.calculateHash()
+        ),
+
+        publicKeyObject,
+
         Buffer.from(
           this.signature,
           "hex"
         )
       );
-    } catch {
+
+    } catch (
+      error
+    ) {
+      console.error(
+        "Erreur vérification signature :",
+        error.message
+      );
+
       return false;
     }
   }
@@ -151,13 +427,23 @@ class Block {
     transactions,
     previousHash = ""
   ) {
-    this.index = index;
-    this.timestamp = timestamp;
-    this.transactions = transactions;
-    this.previousHash = previousHash;
+    this.index =
+      index;
 
-    this.nonce = 0;
-    this.hash = this.calculateHash();
+    this.timestamp =
+      timestamp;
+
+    this.transactions =
+      transactions;
+
+    this.previousHash =
+      previousHash;
+
+    this.nonce =
+      0;
+
+    this.hash =
+      this.calculateHash();
   }
 
   calculateHash() {
@@ -165,14 +451,20 @@ class Block {
       this.index +
       this.previousHash +
       this.timestamp +
-      JSON.stringify(this.transactions) +
+      JSON.stringify(
+        this.transactions
+      ) +
       this.nonce
     );
   }
 
-  mineBlock(difficulty) {
+  mineBlock(
+    difficulty
+  ) {
     const target =
-      "0".repeat(difficulty);
+      "0".repeat(
+        difficulty
+      );
 
     while (
       this.hash.substring(
@@ -192,22 +484,24 @@ class Block {
   }
 
   hasValidTransactions() {
-    return this.transactions.every(
-      transaction => {
-        const tx =
-          Object.assign(
-            new Transaction(),
-            transaction
-          );
+    return this
+      .transactions
+      .every(
+        transaction => {
+          const tx =
+            Object.assign(
+              new Transaction(),
+              transaction
+            );
 
-        return tx.isValid();
-      }
-    );
+          return tx.isValid();
+        }
+      );
   }
 }
 
 // ============================================================
-// BLOCKCHAIN KOALA
+// KOALA BLOCKCHAIN
 // ============================================================
 
 class KoalaBlockchain {
@@ -222,17 +516,25 @@ class KoalaBlockchain {
       this.createGenesisBlock()
     ];
 
-    this.difficulty = 3;
+    this.difficulty =
+      3;
 
-    this.pendingTransactions = [];
+    this.pendingTransactions =
+      [];
 
-    this.miningReward = 50;
+    this.miningReward =
+      50;
 
     this.maxSupply =
       21000000;
 
-    this.totalMined = 0;
+    this.totalMined =
+      0;
   }
+
+  // ==========================================================
+  // GENESIS
+  // ==========================================================
 
   createGenesisBlock() {
     return new Block(
@@ -249,7 +551,13 @@ class KoalaBlockchain {
     ];
   }
 
-  createTransaction(transaction) {
+  // ==========================================================
+  // TRANSACTION
+  // ==========================================================
+
+  createTransaction(
+    transaction
+  ) {
     if (
       !transaction.fromAddress ||
       !transaction.toAddress
@@ -270,7 +578,9 @@ class KoalaBlockchain {
       );
     }
 
-    if (!transaction.isValid()) {
+    if (
+      !transaction.isValid()
+    ) {
       throw new Error(
         "Signature de transaction invalide."
       );
@@ -289,9 +599,14 @@ class KoalaBlockchain {
             transaction.fromAddress
         )
         .reduce(
-          (total, tx) =>
+          (
+            total,
+            tx
+          ) =>
             total +
-            Number(tx.amount),
+            Number(
+              tx.amount
+            ),
           0
         );
 
@@ -311,10 +626,16 @@ class KoalaBlockchain {
     return transaction;
   }
 
+  // ==========================================================
+  // MINAGE
+  // ==========================================================
+
   minePendingTransactions(
     minerAddress
   ) {
-    if (!minerAddress) {
+    if (
+      !minerAddress
+    ) {
       throw new Error(
         "Adresse du mineur obligatoire."
       );
@@ -332,12 +653,11 @@ class KoalaBlockchain {
     const reward =
       Math.min(
         this.miningReward,
+
         this.maxSupply -
           this.totalMined
       );
 
-    // La récompense est incluse directement
-    // dans le bloc qui vient d'être miné.
     const rewardTransaction =
       new Transaction(
         null,
@@ -345,29 +665,33 @@ class KoalaBlockchain {
         reward
       );
 
-    const transactions =
-      [
-        ...this.pendingTransactions,
-        rewardTransaction
-      ];
+    const transactions = [
+      ...this.pendingTransactions,
+      rewardTransaction
+    ];
 
     const block =
       new Block(
         this.chain.length,
         Date.now(),
         transactions,
-        this.getLatestBlock().hash
+        this.getLatestBlock()
+          .hash
       );
 
     block.mineBlock(
       this.difficulty
     );
 
-    this.chain.push(block);
+    this.chain.push(
+      block
+    );
 
-    this.totalMined += reward;
+    this.totalMined +=
+      reward;
 
-    this.pendingTransactions = [];
+    this.pendingTransactions =
+      [];
 
     return {
       block,
@@ -375,8 +699,15 @@ class KoalaBlockchain {
     };
   }
 
-  getBalanceOfAddress(address) {
-    let balance = 0;
+  // ==========================================================
+  // SOLDE
+  // ==========================================================
+
+  getBalanceOfAddress(
+    address
+  ) {
+    let balance =
+      0;
 
     for (
       const block
@@ -411,10 +742,15 @@ class KoalaBlockchain {
     return balance;
   }
 
+  // ==========================================================
+  // HISTORIQUE
+  // ==========================================================
+
   getTransactionsForAddress(
     address
   ) {
-    const transactions = [];
+    const transactions =
+      [];
 
     for (
       const block
@@ -443,17 +779,24 @@ class KoalaBlockchain {
     return transactions;
   }
 
+  // ==========================================================
+  // VALIDATION BLOCKCHAIN
+  // ==========================================================
+
   isChainValid() {
     for (
       let i = 1;
-      i < this.chain.length;
+      i <
+      this.chain.length;
       i++
     ) {
       const currentBlock =
         this.chain[i];
 
       const previousBlock =
-        this.chain[i - 1];
+        this.chain[
+          i - 1
+        ];
 
       if (
         currentBlock.hash !==
@@ -481,9 +824,14 @@ class KoalaBlockchain {
   }
 }
 
+// ============================================================
+// EXPORTS
+// ============================================================
+
 module.exports = {
   KoalaBlockchain,
   Transaction,
   createWallet,
-  addressFromPublicKey
+  addressFromPublicKey,
+  publicKeyHexToKeyObject
 };
