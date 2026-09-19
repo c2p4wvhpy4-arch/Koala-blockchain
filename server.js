@@ -141,53 +141,16 @@ async function saveBlock(block) {
   try {
     await client.query("BEGIN");
 
-    await client.query(
-      `
-      INSERT INTO koa_blocks (
-        block_index,
-        timestamp,
-        previous_hash,
-        hash,
-        nonce,
-        transactions
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        $6::jsonb
-      )
-      ON CONFLICT (block_index)
-      DO NOTHING
-      `,
-      [
-        block.index,
-        block.timestamp,
-        block.previousHash,
-        block.hash,
-        block.nonce,
-        JSON.stringify(
-          block.transactions
-        )
-      ]
-    );
-
-    for (
-      const tx of block.transactions
-    ) {
+    const insertedBlock =
       await client.query(
         `
-        INSERT INTO koa_transactions (
+        INSERT INTO koa_blocks (
           block_index,
-          from_address,
-          to_address,
-          amount,
-          public_key,
-          signature,
-          tx_timestamp,
-          status
+          timestamp,
+          previous_hash,
+          hash,
+          nonce,
+          transactions
         )
         VALUES (
           $1,
@@ -195,29 +158,79 @@ async function saveBlock(block) {
           $3,
           $4,
           $5,
-          $6,
-          $7,
-          'confirmed'
+          $6::jsonb
         )
+        ON CONFLICT (block_index)
+        DO NOTHING
+        RETURNING block_index
         `,
         [
           block.index,
-          tx.fromAddress,
-          tx.toAddress,
-          tx.amount,
-          tx.publicKey || null,
-          tx.signature || null,
-          tx.timestamp
+          block.timestamp,
+          block.previousHash,
+          block.hash,
+          block.nonce,
+          JSON.stringify(
+            block.transactions
+          )
         ]
       );
+
+    /*
+      On insère les transactions uniquement
+      si le bloc vient réellement d'être créé.
+      Cela évite de dupliquer les transactions
+      en cas de nouvelle tentative.
+    */
+
+    if (insertedBlock.rowCount > 0) {
+      for (
+        const tx of block.transactions
+      ) {
+        await client.query(
+          `
+          INSERT INTO koa_transactions (
+            block_index,
+            from_address,
+            to_address,
+            amount,
+            public_key,
+            signature,
+            tx_timestamp,
+            status
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            'confirmed'
+          )
+          `,
+          [
+            block.index,
+            tx.fromAddress,
+            tx.toAddress,
+            tx.amount,
+            tx.publicKey || null,
+            tx.signature || null,
+            tx.timestamp
+          ]
+        );
+      }
     }
 
     await saveState(client);
 
     await client.query("COMMIT");
+
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
+
   } finally {
     client.release();
   }
@@ -236,9 +249,6 @@ async function restoreBlockchain() {
     `);
 
   if (result.rows.length === 0) {
-    // Première installation :
-    // sauvegarde le Genesis créé par blockchain.js.
-
     await saveBlock(
       koala.chain[0]
     );
@@ -252,65 +262,74 @@ async function restoreBlockchain() {
     return;
   }
 
-  koala.chain = result.rows.map(
-    row => {
-      const transactions =
-        Array.isArray(row.transactions)
-          ? row.transactions
-          : [];
+  koala.chain =
+    result.rows.map(
+      row => {
+        const transactions =
+          Array.isArray(
+            row.transactions
+          )
+            ? row.transactions
+            : [];
 
-      return {
-        index:
-          Number(row.block_index),
+        return {
+          index:
+            Number(
+              row.block_index
+            ),
 
-        timestamp:
-          Number(row.timestamp),
+          timestamp:
+            Number(
+              row.timestamp
+            ),
 
-        transactions,
+          transactions,
 
-        previousHash:
-          row.previous_hash,
+          previousHash:
+            row.previous_hash,
 
-        nonce:
-          Number(row.nonce),
+          nonce:
+            Number(
+              row.nonce
+            ),
 
-        hash:
-          row.hash,
+          hash:
+            row.hash,
 
-        calculateHash() {
-          const crypto =
-            require("crypto");
+          calculateHash() {
+            const crypto =
+              require("crypto");
 
-          return crypto
-            .createHash("sha256")
-            .update(
-              this.index +
-              this.previousHash +
-              this.timestamp +
-              JSON.stringify(
-                this.transactions
-              ) +
-              this.nonce
-            )
-            .digest("hex");
-        },
+            return crypto
+              .createHash("sha256")
+              .update(
+                this.index +
+                this.previousHash +
+                this.timestamp +
+                JSON.stringify(
+                  this.transactions
+                ) +
+                this.nonce
+              )
+              .digest("hex");
+          },
 
-        hasValidTransactions() {
-          return this.transactions.every(
-            transaction => {
-              const tx =
-                Object.assign(
-                  new Transaction(),
-                  transaction
-                );
+          hasValidTransactions() {
+            return this.transactions.every(
+              transaction => {
+                const tx =
+                  Object.assign(
+                    new Transaction(),
+                    transaction
+                  );
 
-              return tx.isValid();
-            }
-          );
-        }
-      };
-    }
-  );
+                return tx.isValid();
+              }
+            );
+          }
+        };
+      }
+    );
 
   const stateResult =
     await pool.query(`
@@ -320,9 +339,12 @@ async function restoreBlockchain() {
       LIMIT 1
     `);
 
-  if (stateResult.rows.length) {
+  if (
+    stateResult.rows.length
+  ) {
     const state =
-      stateResult.rows[0].value || {};
+      stateResult.rows[0]
+        .value || {};
 
     koala.totalMined =
       Number(
@@ -341,27 +363,34 @@ async function restoreBlockchain() {
               )
           )
         : [];
-  } else {
-    // Reconstruction du total émis
-    // à partir des récompenses.
 
+  } else {
     let total = 0;
 
-    for (const block of koala.chain) {
+    for (
+      const block
+      of koala.chain
+    ) {
       for (
         const tx
         of block.transactions
       ) {
-        if (tx.fromAddress === null) {
-          total += Number(
-            tx.amount
-          );
+        if (
+          tx.fromAddress === null
+        ) {
+          total +=
+            Number(
+              tx.amount
+            );
         }
       }
     }
 
-    koala.totalMined = total;
-    koala.pendingTransactions = [];
+    koala.totalMined =
+      total;
+
+    koala.pendingTransactions =
+      [];
   }
 
   console.log(
@@ -377,48 +406,84 @@ async function restoreBlockchain() {
 // HEALTH
 // ============================================================
 
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    database: databaseReady,
-    blockchain: koala.name,
-    symbol: koala.symbol
-  });
-});
+app.get(
+  "/health",
+  (req, res) => {
+    res.json({
+      ok: true,
+      database:
+        databaseReady,
+      blockchain:
+        koala.name,
+      symbol:
+        koala.symbol
+    });
+  }
+);
 
 // ============================================================
 // BLOCKCHAIN INFO
 // ============================================================
 
-app.get("/api/info", (req, res) => {
-  res.json({
-    name: koala.name,
-    symbol: koala.symbol,
-    database: databaseReady,
-    blocks: koala.chain.length,
-    difficulty: koala.difficulty,
-    miningReward: koala.miningReward,
-    maxSupply: koala.maxSupply,
-    totalMined: koala.totalMined,
-    pendingTransactions:
-      koala.pendingTransactions.length,
-    valid: koala.isChainValid()
-  });
-});
+app.get(
+  "/api/info",
+  (req, res) => {
+    res.json({
+      name:
+        koala.name,
+
+      symbol:
+        koala.symbol,
+
+      database:
+        databaseReady,
+
+      blocks:
+        koala.chain.length,
+
+      difficulty:
+        koala.difficulty,
+
+      miningReward:
+        koala.miningReward,
+
+      maxSupply:
+        koala.maxSupply,
+
+      totalMined:
+        koala.totalMined,
+
+      pendingTransactions:
+        koala
+          .pendingTransactions
+          .length,
+
+      valid:
+        koala.isChainValid()
+    });
+  }
+);
 
 // ============================================================
 // BLOCKS
 // ============================================================
 
-app.get("/api/blocks", (req, res) => {
-  res.json(koala.chain);
-});
+app.get(
+  "/api/blocks",
+  (req, res) => {
+    res.json(
+      koala.chain
+    );
+  }
+);
 
 app.get(
   "/api/blocks/:index",
   (req, res) => {
     const index =
-      Number(req.params.index);
+      Number(
+        req.params.index
+      );
 
     const block =
       koala.chain[index];
@@ -438,6 +503,7 @@ app.get(
 
 // ============================================================
 // CREATE WALLET
+// TEMPORAIRE : sera remplacé par création côté téléphone.
 // ============================================================
 
 app.post(
@@ -449,17 +515,26 @@ app.post(
 
       res.json({
         success: true,
-        symbol: "KOA",
+
+        symbol:
+          "KOA",
+
         address:
           wallet.address,
+
         publicKey:
           wallet.publicKey,
+
         privateKey:
           wallet.privateKey,
-        balance: 0,
+
+        balance:
+          0,
+
         warning:
-          "Conservez votre clé privée secrète. Elle n'est pas enregistrée par Koala Blockchain."
+          "Route temporaire. La prochaine version créera le portefeuille directement sur l'appareil."
       });
+
     } catch (error) {
       res
         .status(500)
@@ -484,18 +559,21 @@ app.get(
 
     res.json({
       address,
+
       symbol:
         koala.symbol,
+
       balance:
-        koala.getBalanceOfAddress(
-          address
-        )
+        koala
+          .getBalanceOfAddress(
+            address
+          )
     });
   }
 );
 
 // ============================================================
-// TRANSACTIONS
+// TRANSACTIONS EN ATTENTE
 // ============================================================
 
 app.get(
@@ -507,19 +585,37 @@ app.get(
   }
 );
 
+// ============================================================
+// TRANSACTIONS D'UNE ADRESSE
+// ============================================================
+
 app.get(
   "/api/transactions/:address",
   (req, res) => {
     res.json(
-      koala.getTransactionsForAddress(
-        req.params.address
-      )
+      koala
+        .getTransactionsForAddress(
+          req.params.address
+        )
     );
   }
 );
 
 // ============================================================
-// SIGNED TRANSACTION
+// TRANSACTION SIGNÉE
+//
+// IMPORTANT :
+// AUCUNE CLÉ PRIVÉE N'EST ACCEPTÉE ICI.
+//
+// Le téléphone signe la transaction.
+// Le serveur reçoit uniquement :
+//
+// fromAddress
+// toAddress
+// amount
+// publicKey
+// timestamp
+// signature
 // ============================================================
 
 app.post(
@@ -531,60 +627,180 @@ app.post(
         toAddress,
         amount,
         publicKey,
-        privateKey
+        timestamp,
+        signature
       } = req.body;
 
       if (
         !fromAddress ||
         !toAddress ||
         !publicKey ||
-        !privateKey
+        !signature ||
+        timestamp === undefined ||
+        timestamp === null
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            error:
+              "Adresse, clé publique, timestamp et signature obligatoires."
+          });
+      }
+
+      const numericAmount =
+        Number(amount);
+
+      const numericTimestamp =
+        Number(timestamp);
+
+      if (
+        !Number.isFinite(
+          numericAmount
+        ) ||
+        numericAmount <= 0
       ) {
         return res
           .status(400)
           .json({
             success: false,
             error:
-              "Adresse, clé publique et clé privée obligatoires."
+              "Montant KOA invalide."
           });
       }
+
+      if (
+        !Number.isSafeInteger(
+          numericTimestamp
+        ) ||
+        numericTimestamp <= 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error:
+              "Timestamp invalide."
+          });
+      }
+
+      // ------------------------------------------------------
+      // Protection simple contre les timestamps aberrants.
+      // ------------------------------------------------------
+
+      const now =
+        Date.now();
+
+      const maxDifference =
+        10 * 60 * 1000;
+
+      if (
+        Math.abs(
+          now -
+          numericTimestamp
+        ) >
+        maxDifference
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error:
+              "Timestamp de transaction trop ancien ou trop éloigné."
+          });
+      }
+
+      // ------------------------------------------------------
+      // Reconstruction de la transaction signée
+      // ------------------------------------------------------
 
       const transaction =
         new Transaction(
           fromAddress,
           toAddress,
-          Number(amount),
+          numericAmount,
           publicKey
         );
 
-      transaction.signTransaction(
-        privateKey
-      );
+      transaction.timestamp =
+        numericTimestamp;
+
+      transaction.signature =
+        signature;
+
+      // ------------------------------------------------------
+      // Vérification cryptographique
+      // ------------------------------------------------------
+
+      if (
+        !transaction.isValid()
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error:
+              "Signature KOA invalide."
+          });
+      }
+
+      /*
+        createTransaction vérifie encore :
+        - signature
+        - montant
+        - solde confirmé
+        - montants déjà en attente
+      */
 
       koala.createTransaction(
         transaction
       );
 
+      /*
+        Sauvegarde dans koa_state.
+
+        La transaction sera ensuite déplacée
+        dans un bloc lorsqu'un bloc sera miné.
+      */
+
       await saveState();
 
-      res.status(201).json({
-        success: true,
-        message:
-          "Transaction KOA signée et ajoutée au prochain bloc.",
-        transaction: {
-          fromAddress:
-            transaction.fromAddress,
-          toAddress:
-            transaction.toAddress,
-          amount:
-            transaction.amount,
-          timestamp:
-            transaction.timestamp,
-          signature:
-            transaction.signature
-        }
-      });
+      res
+        .status(201)
+        .json({
+          success: true,
+
+          message:
+            "Transaction KOA signée vérifiée et ajoutée au prochain bloc.",
+
+          transaction: {
+            fromAddress:
+              transaction.fromAddress,
+
+            toAddress:
+              transaction.toAddress,
+
+            amount:
+              transaction.amount,
+
+            timestamp:
+              transaction.timestamp,
+
+            publicKey:
+              transaction.publicKey,
+
+            signature:
+              transaction.signature
+          }
+        });
+
     } catch (error) {
+      console.error(
+        "Erreur transaction KOA :",
+        error
+      );
+
       res
         .status(400)
         .json({
@@ -608,24 +824,49 @@ app.post(
         minerAddress
       } = req.body;
 
+      if (
+        !minerAddress ||
+        typeof minerAddress !==
+          "string"
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error:
+              "Adresse du mineur obligatoire."
+          });
+      }
+
       const previousPending =
-        [...koala.pendingTransactions];
+        [
+          ...koala
+            .pendingTransactions
+        ];
 
       const previousTotal =
         koala.totalMined;
 
       const result =
-        koala.minePendingTransactions(
-          minerAddress
-        );
+        koala
+          .minePendingTransactions(
+            minerAddress
+          );
 
       try {
         await saveBlock(
           result.block
         );
-      } catch (databaseError) {
-        // Remet l'état mémoire comme avant
-        // si PostgreSQL refuse la sauvegarde.
+
+      } catch (
+        databaseError
+      ) {
+        /*
+          PostgreSQL a refusé la sauvegarde.
+
+          On annule donc également le bloc
+          dans l'état mémoire.
+        */
 
         koala.chain.pop();
 
@@ -640,18 +881,25 @@ app.post(
 
       res.json({
         success: true,
+
         message:
           "Nouveau bloc KOA créé et sauvegardé.",
+
         reward:
           result.reward,
+
         minerAddress,
+
         balance:
-          koala.getBalanceOfAddress(
-            minerAddress
-          ),
+          koala
+            .getBalanceOfAddress(
+              minerAddress
+            ),
+
         block:
           result.block
       });
+
     } catch (error) {
       console.error(
         "Erreur minage :",
@@ -670,7 +918,7 @@ app.post(
 );
 
 // ============================================================
-// VALIDATE
+// VALIDATION BLOCKCHAIN
 // ============================================================
 
 app.get(
@@ -705,7 +953,21 @@ async function start() {
 
     await restoreBlockchain();
 
-    databaseReady = true;
+    /*
+      Vérification de la blockchain restaurée
+      avant de rendre le serveur disponible.
+    */
+
+    if (
+      !koala.isChainValid()
+    ) {
+      throw new Error(
+        "Blockchain PostgreSQL invalide."
+      );
+    }
+
+    databaseReady =
+      true;
 
     app.listen(
       PORT,
@@ -732,6 +994,14 @@ async function start() {
         );
 
         console.log(
+          "Transactions signées côté client : API prête"
+        );
+
+        console.log(
+          "Clé privée dans /api/transactions : NON"
+        );
+
+        console.log(
           "PostgreSQL : OK"
         );
 
@@ -744,6 +1014,7 @@ async function start() {
         );
       }
     );
+
   } catch (error) {
     console.error(
       "Impossible de démarrer Koala Blockchain :",
