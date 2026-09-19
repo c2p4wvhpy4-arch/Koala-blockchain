@@ -23,6 +23,7 @@ Koala Blockchain
 
 body {
   margin: 0;
+
   font-family:
     Arial,
     Helvetica,
@@ -36,39 +37,54 @@ body {
 }
 
 header {
-  padding: 30px 20px;
+  padding:
+    30px 20px;
 
   background:
     #111827;
 
-  color: white;
+  color:
+    white;
 
-  text-align: center;
+  text-align:
+    center;
 }
 
 header h1 {
   margin: 0;
-  font-size: 30px;
+
+  font-size:
+    30px;
 }
 
 header p {
   opacity: .8;
+
+  margin-bottom: 0;
 }
 
 main {
-  max-width: 900px;
+  max-width:
+    900px;
+
   margin: auto;
-  padding: 20px;
+
+  padding:
+    20px;
 }
 
 .card {
-  background: white;
+  background:
+    white;
 
-  border-radius: 16px;
+  border-radius:
+    16px;
 
-  padding: 20px;
+  padding:
+    20px;
 
-  margin-bottom: 18px;
+  margin-bottom:
+    18px;
 
   box-shadow:
     0 4px 15px
@@ -76,48 +92,57 @@ main {
 }
 
 .grid {
-  display: grid;
+  display:
+    grid;
 
   grid-template-columns:
     repeat(
       auto-fit,
       minmax(
-        150px,
+        140px,
         1fr
       )
     );
 
-  gap: 12px;
+  gap:
+    12px;
 }
 
 .stat {
   background:
     #f9fafb;
 
-  padding: 15px;
+  padding:
+    15px;
 
   border-radius:
     12px;
 }
 
 .stat strong {
-  display: block;
+  display:
+    block;
 
   font-size:
-    22px;
+    21px;
 
   margin-top:
     5px;
 }
 
 button {
+  width: 100%;
+
   border: 0;
 
   border-radius:
     10px;
 
   padding:
-    12px 18px;
+    13px 18px;
+
+  margin-top:
+    8px;
 
   background:
     #111827;
@@ -132,10 +157,21 @@ button {
     pointer;
 }
 
+button.secondary {
+  background:
+    #374151;
+}
+
+button.danger {
+  background:
+    #991b1b;
+}
+
 input {
   width: 100%;
 
-  padding: 12px;
+  padding:
+    12px;
 
   margin:
     7px 0;
@@ -158,7 +194,7 @@ input {
     #f3f4f6;
 
   padding:
-    12px;
+    15px;
 
   border-radius:
     10px;
@@ -167,12 +203,78 @@ input {
     12px;
 }
 
+.wallet-address {
+  font-weight:
+    bold;
+
+  font-size:
+    15px;
+
+  word-break:
+    break-all;
+}
+
+.balance {
+  font-size:
+    28px;
+
+  font-weight:
+    bold;
+
+  margin:
+    12px 0;
+}
+
+.small {
+  font-size:
+    13px;
+
+  color:
+    #6b7280;
+}
+
+.warning {
+  margin-top:
+    12px;
+
+  padding:
+    12px;
+
+  background:
+    #fff7ed;
+
+  border-radius:
+    10px;
+
+  color:
+    #9a3412;
+
+  font-size:
+    13px;
+}
+
+.success {
+  color:
+    #166534;
+
+  font-weight:
+    bold;
+}
+
+.error {
+  color:
+    #b91c1c;
+
+  font-weight:
+    bold;
+}
+
 .block {
   border-left:
     4px solid #111827;
 
   padding:
-    10px 15px;
+    12px 15px;
 
   margin:
     10px 0;
@@ -185,6 +287,46 @@ input {
 
   word-break:
     break-all;
+}
+
+.transaction {
+  margin-top:
+    10px;
+
+  padding:
+    10px;
+
+  background:
+    white;
+
+  border-radius:
+    8px;
+
+  font-size:
+    13px;
+}
+
+.private-box {
+  display:
+    none;
+
+  margin-top:
+    10px;
+
+  padding:
+    12px;
+
+  background:
+    #fee2e2;
+
+  border-radius:
+    10px;
+
+  word-break:
+    break-all;
+
+  font-size:
+    12px;
 }
 
 </style>
@@ -207,6 +349,10 @@ KOA — monnaie native
 
 <main>
 
+<!-- ====================================================== -->
+<!-- RÉSEAU -->
+<!-- ====================================================== -->
+
 <div class="card">
 
 <h2>
@@ -217,30 +363,76 @@ Réseau
   class="grid"
   id="stats"
 >
+Chargement...
 </div>
 
 </div>
+
+<!-- ====================================================== -->
+<!-- PORTEFEUILLE -->
+<!-- ====================================================== -->
 
 <div class="card">
 
 <h2>
-Créer un portefeuille
+Mon portefeuille KOA
 </h2>
 
+<div id="walletArea">
+
+<p>
+Aucun portefeuille chargé.
+</p>
+
+</div>
+
 <button
+  id="createWalletButton"
   onclick="createWallet()"
 >
-Créer une adresse KOA
+Créer un portefeuille KOA
+</button>
+
+<button
+  class="secondary"
+  id="privateButton"
+  onclick="togglePrivateKey()"
+  style="display:none"
+>
+Afficher / masquer la clé privée
 </button>
 
 <div
-  id="wallet"
-  class="wallet"
+  id="privateKeyBox"
+  class="private-box"
 >
-Aucun portefeuille créé.
+</div>
+
+<button
+  class="danger"
+  id="deleteWalletButton"
+  onclick="deleteWallet()"
+  style="display:none"
+>
+Supprimer le portefeuille de cet appareil
+</button>
+
+<div class="warning">
+
+<strong>
+Important :
+</strong>
+
+la clé privée donne accès aux KOA de ce portefeuille.
+Ne la partage jamais et ne l’envoie jamais dans une conversation.
+
 </div>
 
 </div>
+
+<!-- ====================================================== -->
+<!-- MINAGE -->
+<!-- ====================================================== -->
 
 <div class="card">
 
@@ -256,7 +448,7 @@ Miner un bloc
 <button
   onclick="mine()"
 >
-Miner
+Miner un bloc
 </button>
 
 <p id="mineResult">
@@ -264,38 +456,61 @@ Miner
 
 </div>
 
+<!-- ====================================================== -->
+<!-- ENVOI -->
+<!-- ====================================================== -->
+
 <div class="card">
 
 <h2>
 Envoyer des KOA
 </h2>
 
+<div class="small">
+Expéditeur
+</div>
+
 <input
   id="from"
-  placeholder="Adresse expéditeur"
+  placeholder="Adresse KOA"
+  readonly
 >
+
+<div class="small">
+Destinataire
+</div>
 
 <input
   id="to"
-  placeholder="Adresse destinataire"
+  placeholder="Adresse KOA du destinataire"
 >
+
+<div class="small">
+Montant
+</div>
 
 <input
   id="amount"
   type="number"
+  min="0"
+  step="0.00000001"
   placeholder="Montant KOA"
 >
 
 <button
   onclick="sendTransaction()"
 >
-Envoyer
+Signer et envoyer
 </button>
 
 <p id="transactionResult">
 </p>
 
 </div>
+
+<!-- ====================================================== -->
+<!-- BLOCKCHAIN -->
+<!-- ====================================================== -->
 
 <div class="card">
 
@@ -311,72 +526,739 @@ Chargement...
 
 </main>
 
-<script>
+<script type="module">
 
-async function load() {
+import * as secp
+  from "/vendor/secp256k1.js";
 
-  const info =
-    await fetch(
-      "/api/info"
-    ).then(
-      r => r.json()
+// ============================================================
+// VARIABLES
+// ============================================================
+
+let wallet = null;
+
+const WALLET_STORAGE_KEY =
+  "koala_wallet_v1";
+
+// ============================================================
+// OUTILS
+// ============================================================
+
+function bytesToHex(bytes) {
+  return Array
+    .from(bytes)
+    .map(
+      byte =>
+        byte
+          .toString(16)
+          .padStart(2, "0")
+    )
+    .join("");
+}
+
+function hexToBytes(hex) {
+  if (
+    typeof hex !== "string" ||
+    hex.length % 2 !== 0
+  ) {
+    throw new Error(
+      "Donnée hexadécimale invalide."
     );
+  }
+
+  const bytes =
+    new Uint8Array(
+      hex.length / 2
+    );
+
+  for (
+    let i = 0;
+    i < bytes.length;
+    i++
+  ) {
+    bytes[i] =
+      parseInt(
+        hex.slice(
+          i * 2,
+          i * 2 + 2
+        ),
+        16
+      );
+  }
+
+  return bytes;
+}
+
+// ============================================================
+// SHA-256 NAVIGATEUR
+// ============================================================
+
+async function sha256Hex(
+  value
+) {
+  const encoded =
+    new TextEncoder()
+      .encode(
+        value
+      );
+
+  const hash =
+    await crypto
+      .subtle
+      .digest(
+        "SHA-256",
+        encoded
+      );
+
+  return bytesToHex(
+    new Uint8Array(
+      hash
+    )
+  );
+}
+
+// ============================================================
+// ADRESSE KOA
+//
+// Même méthode que blockchain.js :
+//
+// KOA_ + 40 premiers caractères
+// du SHA256 de la clé publique hex.
+// ============================================================
+
+async function addressFromPublicKey(
+  publicKeyHex
+) {
+  const normalized =
+    publicKeyHex
+      .trim()
+      .toLowerCase();
+
+  const hash =
+    await sha256Hex(
+      normalized
+    );
+
+  return (
+    "KOA_" +
+    hash.substring(
+      0,
+      40
+    )
+  );
+}
+
+// ============================================================
+// SIGNATURE COMPACTE -> DER
+//
+// @noble/secp256k1 produit une signature ECDSA compacte.
+// Node crypto.verify utilise ici une signature DER.
+//
+// Cette fonction convertit r || s vers DER.
+// ============================================================
+
+function compactSignatureToDer(
+  compact
+) {
+  let bytes;
+
+  if (
+    compact instanceof
+    Uint8Array
+  ) {
+    bytes = compact;
+  } else if (
+    compact &&
+    typeof compact.toBytes ===
+      "function"
+  ) {
+    bytes =
+      compact.toBytes();
+  } else {
+    throw new Error(
+      "Format de signature inconnu."
+    );
+  }
+
+  if (
+    bytes.length !== 64
+  ) {
+    throw new Error(
+      "Signature secp256k1 invalide."
+    );
+  }
+
+  let r =
+    Array.from(
+      bytes.slice(
+        0,
+        32
+      )
+    );
+
+  let s =
+    Array.from(
+      bytes.slice(
+        32,
+        64
+      )
+    );
+
+  while (
+    r.length > 1 &&
+    r[0] === 0 &&
+    (r[1] & 0x80) === 0
+  ) {
+    r.shift();
+  }
+
+  while (
+    s.length > 1 &&
+    s[0] === 0 &&
+    (s[1] & 0x80) === 0
+  ) {
+    s.shift();
+  }
+
+  if (
+    r[0] & 0x80
+  ) {
+    r.unshift(0);
+  }
+
+  if (
+    s[0] & 0x80
+  ) {
+    s.unshift(0);
+  }
+
+  const sequenceLength =
+    2 +
+    r.length +
+    2 +
+    s.length;
+
+  return new Uint8Array([
+    0x30,
+    sequenceLength,
+
+    0x02,
+    r.length,
+    ...r,
+
+    0x02,
+    s.length,
+    ...s
+  ]);
+}
+
+// ============================================================
+// CRÉER LE PORTEFEUILLE SUR L'APPAREIL
+// ============================================================
+
+window.createWallet =
+  async function() {
+
+    try {
+
+      /*
+        Génération locale d'une clé privée
+        secp256k1 de 32 octets.
+      */
+
+      const privateKey =
+        secp.utils
+          .randomSecretKey();
+
+      /*
+        Clé publique compressée :
+        33 octets.
+      */
+
+      const publicKey =
+        secp.getPublicKey(
+          privateKey
+        );
+
+      const privateKeyHex =
+        bytesToHex(
+          privateKey
+        );
+
+      const publicKeyHex =
+        bytesToHex(
+          publicKey
+        );
+
+      const address =
+        await addressFromPublicKey(
+          publicKeyHex
+        );
+
+      wallet = {
+        address,
+        publicKey:
+          publicKeyHex,
+        privateKey:
+          privateKeyHex
+      };
+
+      /*
+        Stockage local sur cet appareil.
+
+        IMPORTANT :
+        cette version est destinée au développement.
+      */
+
+      localStorage.setItem(
+        WALLET_STORAGE_KEY,
+        JSON.stringify(
+          wallet
+        )
+      );
+
+      showWallet();
+
+      await refreshBalance();
+
+    } catch (error) {
+
+      console.error(
+        error
+      );
+
+      alert(
+        "Impossible de créer le portefeuille : " +
+        error.message
+      );
+    }
+  };
+
+// ============================================================
+// RESTAURER LE PORTEFEUILLE LOCAL
+// ============================================================
+
+function restoreWallet() {
+
+  try {
+
+    const saved =
+      localStorage.getItem(
+        WALLET_STORAGE_KEY
+      );
+
+    if (!saved) {
+      return;
+    }
+
+    const parsed =
+      JSON.parse(
+        saved
+      );
+
+    if (
+      !parsed.address ||
+      !parsed.publicKey ||
+      !parsed.privateKey
+    ) {
+      localStorage.removeItem(
+        WALLET_STORAGE_KEY
+      );
+
+      return;
+    }
+
+    wallet =
+      parsed;
+
+    showWallet();
+
+  } catch (error) {
+
+    console.error(
+      "Erreur restauration wallet :",
+      error
+    );
+  }
+}
+
+// ============================================================
+// AFFICHAGE WALLET
+// ============================================================
+
+function showWallet() {
+
+  if (!wallet) {
+
+    document
+      .getElementById(
+        "walletArea"
+      )
+      .innerHTML =
+        "<p>Aucun portefeuille chargé.</p>";
+
+    return;
+  }
 
   document
     .getElementById(
-      "stats"
+      "walletArea"
     )
     .innerHTML = `
 
+<div class="small">
+Adresse
+</div>
+
+<div class="wallet">
+
+<div class="wallet-address">
+${wallet.address}
+</div>
+
+<div
+  class="balance"
+  id="walletBalance"
+>
+... KOA
+</div>
+
+<div class="small">
+Clé publique :
+<br>
+${wallet.publicKey}
+</div>
+
+</div>
+
+`;
+
+  document
+    .getElementById(
+      "miner"
+    )
+    .value =
+      wallet.address;
+
+  document
+    .getElementById(
+      "from"
+    )
+    .value =
+      wallet.address;
+
+  document
+    .getElementById(
+      "createWalletButton"
+    )
+    .style
+    .display =
+      "none";
+
+  document
+    .getElementById(
+      "privateButton"
+    )
+    .style
+    .display =
+      "block";
+
+  document
+    .getElementById(
+      "deleteWalletButton"
+    )
+    .style
+    .display =
+      "block";
+
+  document
+    .getElementById(
+      "privateKeyBox"
+    )
+    .textContent =
+      wallet.privateKey;
+}
+
+// ============================================================
+// AFFICHER / MASQUER CLÉ PRIVÉE
+// ============================================================
+
+window.togglePrivateKey =
+  function() {
+
+    const box =
+      document
+        .getElementById(
+          "privateKeyBox"
+        );
+
+    if (
+      box.style.display ===
+      "block"
+    ) {
+      box.style.display =
+        "none";
+    } else {
+      box.style.display =
+        "block";
+    }
+  };
+
+// ============================================================
+// SUPPRIMER WALLET LOCAL
+// ============================================================
+
+window.deleteWallet =
+  function() {
+
+    const confirmed =
+      confirm(
+        "Supprimer ce portefeuille de cet appareil ? Vérifie d'abord que tu as sauvegardé ta clé privée."
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    localStorage.removeItem(
+      WALLET_STORAGE_KEY
+    );
+
+    wallet =
+      null;
+
+    document
+      .getElementById(
+        "walletArea"
+      )
+      .innerHTML =
+        "<p>Aucun portefeuille chargé.</p>";
+
+    document
+      .getElementById(
+        "miner"
+      )
+      .value =
+        "";
+
+    document
+      .getElementById(
+        "from"
+      )
+      .value =
+        "";
+
+    document
+      .getElementById(
+        "privateKeyBox"
+      )
+      .style
+      .display =
+        "none";
+
+    document
+      .getElementById(
+        "privateButton"
+      )
+      .style
+      .display =
+        "none";
+
+    document
+      .getElementById(
+        "deleteWalletButton"
+      )
+      .style
+      .display =
+        "none";
+
+    document
+      .getElementById(
+        "createWalletButton"
+      )
+      .style
+      .display =
+        "block";
+  };
+
+// ============================================================
+// SOLDE
+// ============================================================
+
+async function refreshBalance() {
+
+  if (!wallet) {
+    return;
+  }
+
+  try {
+
+    const response =
+      await fetch(
+        "/api/balance/" +
+        encodeURIComponent(
+          wallet.address
+        )
+      );
+
+    const result =
+      await response.json();
+
+    const balanceElement =
+      document
+        .getElementById(
+          "walletBalance"
+        );
+
+    if (
+      balanceElement
+    ) {
+      balanceElement
+        .textContent =
+          `${result.balance} KOA`;
+    }
+
+  } catch (error) {
+
+    console.error(
+      "Erreur solde :",
+      error
+    );
+  }
+}
+
+// ============================================================
+// CHARGEMENT DU RÉSEAU
+// ============================================================
+
+async function load() {
+
+  try {
+
+    const infoResponse =
+      await fetch(
+        "/api/info"
+      );
+
+    const info =
+      await infoResponse
+        .json();
+
+    document
+      .getElementById(
+        "stats"
+      )
+      .innerHTML = `
+
 <div class="stat">
+
 Blocs
+
 <strong>
 ${info.blocks}
 </strong>
+
 </div>
 
 <div class="stat">
+
 KOA créés
+
 <strong>
 ${info.totalMined}
 </strong>
+
 </div>
 
 <div class="stat">
+
 Récompense
+
 <strong>
 ${info.miningReward} KOA
 </strong>
+
 </div>
 
 <div class="stat">
+
+Transactions en attente
+
+<strong>
+${info.pendingTransactions}
+</strong>
+
+</div>
+
+<div class="stat">
+
 Réseau
+
 <strong>
 ${info.valid
   ? "Valide"
   : "Erreur"}
 </strong>
+
 </div>
 
 `;
 
-  const blocks =
-    await fetch(
-      "/api/blocks"
-    ).then(
-      r => r.json()
-    );
+    const blocksResponse =
+      await fetch(
+        "/api/blocks"
+      );
 
-  document
-    .getElementById(
-      "blocks"
-    )
-    .innerHTML =
-      blocks
-        .slice()
-        .reverse()
-        .map(
-          block => `
+    const blocks =
+      await blocksResponse
+        .json();
+
+    document
+      .getElementById(
+        "blocks"
+      )
+      .innerHTML =
+        blocks
+          .slice()
+          .reverse()
+          .map(
+            block => {
+
+              const transactions =
+                block.transactions
+                  .map(
+                    tx => `
+
+<div class="transaction">
+
+<strong>
+${tx.fromAddress === null
+  ? "Récompense minière"
+  : "Transaction"}
+</strong>
+
+<br>
+
+De :
+${tx.fromAddress || "Réseau KOA"}
+
+<br>
+
+Vers :
+${tx.toAddress}
+
+<br>
+
+Montant :
+${tx.amount} KOA
+
+</div>
+
+`
+                  )
+                  .join("");
+
+              return `
 
 <div class="block">
 
@@ -389,147 +1271,357 @@ Bloc #${block.index}
 Transactions :
 ${block.transactions.length}
 
-<br>
+<br><br>
 
 Hash :
+<br>
 ${block.hash}
+
+${transactions}
 
 </div>
 
-`
-        )
-        .join("");
-}
+`;
 
-async function createWallet() {
+            }
+          )
+          .join("");
 
-  const result =
-    await fetch(
-      "/api/wallet",
-      {
-        method:
-          "POST"
-      }
-    ).then(
-      r => r.json()
+    await refreshBalance();
+
+  } catch (error) {
+
+    console.error(
+      "Erreur chargement :",
+      error
     );
-
-  document
-    .getElementById(
-      "wallet"
-    )
-    .innerHTML =
-      `<strong>${result.address}</strong>`;
-
-  document
-    .getElementById(
-      "miner"
-    )
-    .value =
-      result.address;
+  }
 }
 
-async function mine() {
+// ============================================================
+// MINAGE
+// ============================================================
 
-  const minerAddress =
-    document
-      .getElementById(
-        "miner"
-      )
-      .value;
+window.mine =
+  async function() {
 
-  const result =
-    await fetch(
-      "/api/mine",
-      {
-        method:
-          "POST",
+    const resultElement =
+      document
+        .getElementById(
+          "mineResult"
+        );
 
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
+    try {
 
-        body:
-          JSON.stringify({
-            minerAddress
-          })
+      const minerAddress =
+        document
+          .getElementById(
+            "miner"
+          )
+          .value
+          .trim();
+
+      if (!minerAddress) {
+
+        throw new Error(
+          "Adresse du mineur obligatoire."
+        );
       }
-    ).then(
-      r => r.json()
-    );
 
-  document
-    .getElementById(
-      "mineResult"
-    )
-    .textContent =
-      result.success
-        ? `Bloc miné. Récompense : ${result.reward} KOA`
-        : result.error;
+      resultElement
+        .textContent =
+          "Minage en cours...";
 
-  load();
-}
+      resultElement
+        .className =
+          "";
 
-async function sendTransaction() {
+      const response =
+        await fetch(
+          "/api/mine",
+          {
+            method:
+              "POST",
 
-  const fromAddress =
-    document
-      .getElementById(
-        "from"
-      )
-      .value;
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
 
-  const toAddress =
-    document
-      .getElementById(
-        "to"
-      )
-      .value;
+            body:
+              JSON.stringify({
+                minerAddress
+              })
+          }
+        );
 
-  const amount =
-    Number(
+      const result =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !result.success
+      ) {
+        throw new Error(
+          result.error ||
+          "Erreur de minage."
+        );
+      }
+
+      resultElement
+        .textContent =
+          `Bloc miné. Récompense : ${result.reward} KOA`;
+
+      resultElement
+        .className =
+          "success";
+
+      await load();
+
+    } catch (error) {
+
+      resultElement
+        .textContent =
+          error.message;
+
+      resultElement
+        .className =
+          "error";
+    }
+  };
+
+// ============================================================
+// ENVOI SIGNÉ
+// ============================================================
+
+window.sendTransaction =
+  async function() {
+
+    const resultElement =
+      document
+        .getElementById(
+          "transactionResult"
+        );
+
+    try {
+
+      if (!wallet) {
+        throw new Error(
+          "Crée d'abord un portefeuille KOA."
+        );
+      }
+
+      const fromAddress =
+        wallet.address;
+
+      const toAddress =
+        document
+          .getElementById(
+            "to"
+          )
+          .value
+          .trim();
+
+      const amount =
+        Number(
+          document
+            .getElementById(
+              "amount"
+            )
+            .value
+        );
+
+      if (!toAddress) {
+        throw new Error(
+          "Adresse destinataire obligatoire."
+        );
+      }
+
+      if (
+        !Number.isFinite(
+          amount
+        ) ||
+        amount <= 0
+      ) {
+        throw new Error(
+          "Montant KOA invalide."
+        );
+      }
+
+      const timestamp =
+        Date.now();
+
+      /*
+        Doit correspondre exactement
+        à Transaction.calculateHash()
+        dans blockchain.js.
+      */
+
+      const transactionText =
+        String(
+          fromAddress
+        ) +
+        String(
+          toAddress
+        ) +
+        String(
+          amount
+        ) +
+        String(
+          timestamp
+        );
+
+      /*
+        blockchain.js fait d'abord :
+        SHA256(transactionText)
+
+        puis crypto.sign("sha256", ASCII_DU_HASH)
+
+        Donc le navigateur calcule d'abord
+        le même hash hexadécimal.
+      */
+
+      const transactionHash =
+        await sha256Hex(
+          transactionText
+        );
+
+      const message =
+        new TextEncoder()
+          .encode(
+            transactionHash
+          );
+
+      const privateKeyBytes =
+        hexToBytes(
+          wallet.privateKey
+        );
+
+      /*
+        signAsync effectue l'ECDSA secp256k1.
+
+        Par défaut la bibliothèque applique
+        SHA-256 au message, ce qui correspond
+        au crypto.sign("sha256", ...)
+        utilisé par Node.
+      */
+
+      const compactSignature =
+        await secp.signAsync(
+          message,
+          privateKeyBytes
+        );
+
+      /*
+        Conversion vers DER pour
+        crypto.verify côté serveur.
+      */
+
+      const derSignature =
+        compactSignatureToDer(
+          compactSignature
+        );
+
+      const signatureHex =
+        bytesToHex(
+          derSignature
+        );
+
+      resultElement
+        .textContent =
+          "Vérification de la signature...";
+
+      resultElement
+        .className =
+          "";
+
+      /*
+        IMPORTANT :
+
+        privateKey n'est PAS présente
+        dans cet objet.
+      */
+
+      const response =
+        await fetch(
+          "/api/transactions",
+          {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+                fromAddress,
+                toAddress,
+                amount,
+
+                publicKey:
+                  wallet.publicKey,
+
+                timestamp,
+                signature:
+                  signatureHex
+              })
+          }
+        );
+
+      const result =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !result.success
+      ) {
+        throw new Error(
+          result.error ||
+          "Transaction refusée."
+        );
+      }
+
+      resultElement
+        .textContent =
+          "Transaction KOA signée et ajoutée au prochain bloc.";
+
+      resultElement
+        .className =
+          "success";
+
       document
         .getElementById(
           "amount"
         )
-        .value
-    );
+        .value =
+          "";
 
-  const result =
-    await fetch(
-      "/api/transactions",
-      {
-        method:
-          "POST",
+      await load();
 
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
+    } catch (error) {
 
-        body:
-          JSON.stringify({
-            fromAddress,
-            toAddress,
-            amount
-          })
-      }
-    ).then(
-      r => r.json()
-    );
+      console.error(
+        "Erreur transaction :",
+        error
+      );
 
-  document
-    .getElementById(
-      "transactionResult"
-    )
-    .textContent =
-      result.success
-        ? "Transaction ajoutée au prochain bloc."
-        : result.error;
+      resultElement
+        .textContent =
+          error.message;
 
-  load();
-}
+      resultElement
+        .className =
+          "error";
+    }
+  };
+
+// ============================================================
+// DÉMARRAGE
+// ============================================================
+
+restoreWallet();
 
 load();
 
