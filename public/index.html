@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+
+<html lang="fr">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1"
+>
+
+<title>
+Koala Blockchain
+</title>
+
+<style>
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
+
+  background:
+    #f4f6f8;
+
+  color:
+    #111827;
+}
+
+header {
+  padding: 30px 20px;
+
+  background:
+    #111827;
+
+  color: white;
+
+  text-align: center;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 30px;
+}
+
+header p {
+  opacity: .8;
+}
+
+main {
+  max-width: 900px;
+  margin: auto;
+  padding: 20px;
+}
+
+.card {
+  background: white;
+
+  border-radius: 16px;
+
+  padding: 20px;
+
+  margin-bottom: 18px;
+
+  box-shadow:
+    0 4px 15px
+    rgba(0,0,0,.06);
+}
+
+.grid {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(
+        150px,
+        1fr
+      )
+    );
+
+  gap: 12px;
+}
+
+.stat {
+  background:
+    #f9fafb;
+
+  padding: 15px;
+
+  border-radius:
+    12px;
+}
+
+.stat strong {
+  display: block;
+
+  font-size:
+    22px;
+
+  margin-top:
+    5px;
+}
+
+button {
+  border: 0;
+
+  border-radius:
+    10px;
+
+  padding:
+    12px 18px;
+
+  background:
+    #111827;
+
+  color:
+    white;
+
+  font-size:
+    15px;
+
+  cursor:
+    pointer;
+}
+
+input {
+  width: 100%;
+
+  padding: 12px;
+
+  margin:
+    7px 0;
+
+  border:
+    1px solid #ddd;
+
+  border-radius:
+    10px;
+
+  font-size:
+    16px;
+}
+
+.wallet {
+  word-break:
+    break-all;
+
+  background:
+    #f3f4f6;
+
+  padding:
+    12px;
+
+  border-radius:
+    10px;
+
+  margin-top:
+    12px;
+}
+
+.block {
+  border-left:
+    4px solid #111827;
+
+  padding:
+    10px 15px;
+
+  margin:
+    10px 0;
+
+  background:
+    #f9fafb;
+
+  border-radius:
+    8px;
+
+  word-break:
+    break-all;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<header>
+
+<h1>
+🐨 Koala Blockchain
+</h1>
+
+<p>
+KOA — monnaie native
+</p>
+
+</header>
+
+<main>
+
+<div class="card">
+
+<h2>
+Réseau
+</h2>
+
+<div
+  class="grid"
+  id="stats"
+>
+</div>
+
+</div>
+
+<div class="card">
+
+<h2>
+Créer un portefeuille
+</h2>
+
+<button
+  onclick="createWallet()"
+>
+Créer une adresse KOA
+</button>
+
+<div
+  id="wallet"
+  class="wallet"
+>
+Aucun portefeuille créé.
+</div>
+
+</div>
+
+<div class="card">
+
+<h2>
+Miner un bloc
+</h2>
+
+<input
+  id="miner"
+  placeholder="Adresse KOA du mineur"
+>
+
+<button
+  onclick="mine()"
+>
+Miner
+</button>
+
+<p id="mineResult">
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>
+Envoyer des KOA
+</h2>
+
+<input
+  id="from"
+  placeholder="Adresse expéditeur"
+>
+
+<input
+  id="to"
+  placeholder="Adresse destinataire"
+>
+
+<input
+  id="amount"
+  type="number"
+  placeholder="Montant KOA"
+>
+
+<button
+  onclick="sendTransaction()"
+>
+Envoyer
+</button>
+
+<p id="transactionResult">
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>
+Blockchain
+</h2>
+
+<div id="blocks">
+Chargement...
+</div>
+
+</div>
+
+</main>
+
+<script>
+
+async function load() {
+
+  const info =
+    await fetch(
+      "/api/info"
+    ).then(
+      r => r.json()
+    );
+
+  document
+    .getElementById(
+      "stats"
+    )
+    .innerHTML = `
+
+<div class="stat">
+Blocs
+<strong>
+${info.blocks}
+</strong>
+</div>
+
+<div class="stat">
+KOA créés
+<strong>
+${info.totalMined}
+</strong>
+</div>
+
+<div class="stat">
+Récompense
+<strong>
+${info.miningReward} KOA
+</strong>
+</div>
+
+<div class="stat">
+Réseau
+<strong>
+${info.valid
+  ? "Valide"
+  : "Erreur"}
+</strong>
+</div>
+
+`;
+
+  const blocks =
+    await fetch(
+      "/api/blocks"
+    ).then(
+      r => r.json()
+    );
+
+  document
+    .getElementById(
+      "blocks"
+    )
+    .innerHTML =
+      blocks
+        .slice()
+        .reverse()
+        .map(
+          block => `
+
+<div class="block">
+
+<strong>
+Bloc #${block.index}
+</strong>
+
+<br><br>
+
+Transactions :
+${block.transactions.length}
+
+<br>
+
+Hash :
+${block.hash}
+
+</div>
+
+`
+        )
+        .join("");
+}
+
+async function createWallet() {
+
+  const result =
+    await fetch(
+      "/api/wallet",
+      {
+        method:
+          "POST"
+      }
+    ).then(
+      r => r.json()
+    );
+
+  document
+    .getElementById(
+      "wallet"
+    )
+    .innerHTML =
+      `<strong>${result.address}</strong>`;
+
+  document
+    .getElementById(
+      "miner"
+    )
+    .value =
+      result.address;
+}
+
+async function mine() {
+
+  const minerAddress =
+    document
+      .getElementById(
+        "miner"
+      )
+      .value;
+
+  const result =
+    await fetch(
+      "/api/mine",
+      {
+        method:
+          "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body:
+          JSON.stringify({
+            minerAddress
+          })
+      }
+    ).then(
+      r => r.json()
+    );
+
+  document
+    .getElementById(
+      "mineResult"
+    )
+    .textContent =
+      result.success
+        ? `Bloc miné. Récompense : ${result.reward} KOA`
+        : result.error;
+
+  load();
+}
+
+async function sendTransaction() {
+
+  const fromAddress =
+    document
+      .getElementById(
+        "from"
+      )
+      .value;
+
+  const toAddress =
+    document
+      .getElementById(
+        "to"
+      )
+      .value;
+
+  const amount =
+    Number(
+      document
+        .getElementById(
+          "amount"
+        )
+        .value
+    );
+
+  const result =
+    await fetch(
+      "/api/transactions",
+      {
+        method:
+          "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body:
+          JSON.stringify({
+            fromAddress,
+            toAddress,
+            amount
+          })
+      }
+    ).then(
+      r => r.json()
+    );
+
+  document
+    .getElementById(
+      "transactionResult"
+    )
+    .textContent =
+      result.success
+        ? "Transaction ajoutée au prochain bloc."
+        : result.error;
+
+  load();
+}
+
+load();
+
+setInterval(
+  load,
+  5000
+);
+
+</script>
+
+</body>
+
+</html>
