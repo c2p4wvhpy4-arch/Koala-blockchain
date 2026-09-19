@@ -1,130 +1,79 @@
-const express =
-  require("express");
-
-const crypto =
-  require("crypto");
-
-const path =
-  require("path");
+const express = require("express");
+const path = require("path");
 
 const {
   KoalaBlockchain,
-  Transaction
+  Transaction,
+  createWallet
 } = require("./blockchain");
 
 const app = express();
 
-const PORT =
-  Number(
-    process.env.PORT || 3000
-  );
+const PORT = Number(
+  process.env.PORT || 3000
+);
 
 app.use(express.json());
 
 app.use(
   express.static(
-    path.join(
-      __dirname,
-      "public"
-    )
+    path.join(__dirname, "public")
   )
 );
 
-const koala =
-  new KoalaBlockchain();
-
-function createAddress() {
-  return (
-    "KOA_" +
-    crypto
-      .randomBytes(20)
-      .toString("hex")
-  );
-}
+const koala = new KoalaBlockchain();
 
 /*
-====================================
+==================================================
 HEALTH
-====================================
+==================================================
 */
 
-app.get(
-  "/health",
-  (req, res) => {
-    res.json({
-      ok: true,
-      blockchain:
-        koala.name,
-      symbol:
-        koala.symbol
-    });
-  }
-);
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    blockchain: koala.name,
+    symbol: koala.symbol
+  });
+});
 
 /*
-====================================
+==================================================
 BLOCKCHAIN INFO
-====================================
+==================================================
 */
 
-app.get(
-  "/api/info",
-  (req, res) => {
-    res.json({
-      name:
-        koala.name,
-
-      symbol:
-        koala.symbol,
-
-      blocks:
-        koala.chain.length,
-
-      difficulty:
-        koala.difficulty,
-
-      miningReward:
-        koala.miningReward,
-
-      maxSupply:
-        koala.maxSupply,
-
-      totalMined:
-        koala.totalMined,
-
-      pendingTransactions:
-        koala
-          .pendingTransactions
-          .length,
-
-      valid:
-        koala.isChainValid()
-    });
-  }
-);
+app.get("/api/info", (req, res) => {
+  res.json({
+    name: koala.name,
+    symbol: koala.symbol,
+    blocks: koala.chain.length,
+    difficulty: koala.difficulty,
+    miningReward: koala.miningReward,
+    maxSupply: koala.maxSupply,
+    totalMined: koala.totalMined,
+    pendingTransactions:
+      koala.pendingTransactions.length,
+    valid: koala.isChainValid()
+  });
+});
 
 /*
-====================================
+==================================================
 BLOCKS
-====================================
+==================================================
 */
 
-app.get(
-  "/api/blocks",
-  (req, res) => {
-    res.json(
-      koala.chain
-    );
-  }
-);
+app.get("/api/blocks", (req, res) => {
+  res.json(koala.chain);
+});
 
 app.get(
   "/api/blocks/:index",
   (req, res) => {
-    const index =
-      Number(
-        req.params.index
-      );
+    const index = Number(
+      req.params.index
+    );
 
     const block =
       koala.chain[index];
@@ -133,8 +82,7 @@ app.get(
       return res
         .status(404)
         .json({
-          error:
-            "Bloc introuvable."
+          error: "Bloc introuvable."
         });
     }
 
@@ -143,29 +91,46 @@ app.get(
 );
 
 /*
-====================================
+==================================================
 CREATE WALLET
-====================================
+==================================================
 */
 
 app.post(
   "/api/wallet",
   (req, res) => {
-    const address =
-      createAddress();
+    try {
+      const wallet =
+        createWallet();
 
-    res.json({
-      address,
-      symbol: "KOA",
-      balance: 0
-    });
+      res.json({
+        success: true,
+        symbol: "KOA",
+        address:
+          wallet.address,
+        publicKey:
+          wallet.publicKey,
+        privateKey:
+          wallet.privateKey,
+        balance: 0,
+        warning:
+          "Conservez votre clé privée secrète. Elle permet de dépenser vos KOA."
+      });
+    } catch (error) {
+      res
+        .status(500)
+        .json({
+          success: false,
+          error: error.message
+        });
+    }
   }
 );
 
 /*
-====================================
+==================================================
 BALANCE
-====================================
+==================================================
 */
 
 app.get(
@@ -176,22 +141,19 @@ app.get(
 
     res.json({
       address,
-      symbol:
-        koala.symbol,
-
+      symbol: koala.symbol,
       balance:
-        koala
-          .getBalanceOfAddress(
-            address
-          )
+        koala.getBalanceOfAddress(
+          address
+        )
     });
   }
 );
 
 /*
-====================================
+==================================================
 TRANSACTIONS
-====================================
+==================================================
 */
 
 app.get(
@@ -207,13 +169,18 @@ app.get(
   "/api/transactions/:address",
   (req, res) => {
     res.json(
-      koala
-        .getTransactionsForAddress(
-          req.params.address
-        )
+      koala.getTransactionsForAddress(
+        req.params.address
+      )
     );
   }
 );
+
+/*
+==================================================
+SIGNED TRANSACTION
+==================================================
+*/
 
 app.post(
   "/api/transactions",
@@ -222,44 +189,74 @@ app.post(
       const {
         fromAddress,
         toAddress,
-        amount
+        amount,
+        publicKey,
+        privateKey
       } = req.body;
+
+      if (
+        !fromAddress ||
+        !toAddress ||
+        !publicKey ||
+        !privateKey
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error:
+              "Adresse, clé publique et clé privée obligatoires."
+          });
+      }
 
       const transaction =
         new Transaction(
           fromAddress,
           toAddress,
-          Number(amount)
+          Number(amount),
+          publicKey
         );
 
-      koala
-        .createTransaction(
-          transaction
-        );
+      transaction.signTransaction(
+        privateKey
+      );
+
+      koala.createTransaction(
+        transaction
+      );
 
       res.status(201).json({
         success: true,
         message:
-          "Transaction ajoutée.",
-        transaction
+          "Transaction KOA signée et ajoutée au prochain bloc.",
+        transaction: {
+          fromAddress:
+            transaction.fromAddress,
+          toAddress:
+            transaction.toAddress,
+          amount:
+            transaction.amount,
+          timestamp:
+            transaction.timestamp,
+          signature:
+            transaction.signature
+        }
       });
-
     } catch (error) {
       res
         .status(400)
         .json({
           success: false,
-          error:
-            error.message
+          error: error.message
         });
     }
   }
 );
 
 /*
-====================================
+==================================================
 MINING
-====================================
+==================================================
 */
 
 app.post(
@@ -271,40 +268,39 @@ app.post(
       } = req.body;
 
       const result =
-        koala
-          .minePendingTransactions(
-            minerAddress
-          );
+        koala.minePendingTransactions(
+          minerAddress
+        );
 
       res.json({
         success: true,
-
         message:
           "Nouveau bloc KOA créé.",
-
         reward:
           result.reward,
-
+        minerAddress,
+        balance:
+          koala.getBalanceOfAddress(
+            minerAddress
+          ),
         block:
           result.block
       });
-
     } catch (error) {
       res
         .status(400)
         .json({
           success: false,
-          error:
-            error.message
+          error: error.message
         });
     }
   }
 );
 
 /*
-====================================
-VALIDATION
-====================================
+==================================================
+VALIDATE BLOCKCHAIN
+==================================================
 */
 
 app.get(
@@ -318,9 +314,9 @@ app.get(
 );
 
 /*
-====================================
-START
-====================================
+==================================================
+START SERVER
+==================================================
 */
 
 app.listen(
@@ -328,7 +324,7 @@ app.listen(
   "0.0.0.0",
   () => {
     console.log(
-      "=================================="
+      "======================================"
     );
 
     console.log(
@@ -340,11 +336,19 @@ app.listen(
     );
 
     console.log(
+      "Wallet cryptographique : OK"
+    );
+
+    console.log(
+      "Signatures secp256k1 : OK"
+    );
+
+    console.log(
       `Port : ${PORT}`
     );
 
     console.log(
-      "=================================="
+      "======================================"
     );
   }
 );
