@@ -595,6 +595,66 @@ function validateExternalChain(rawChain) {
   }
 }
 
+
+// ============================================================
+// CONSENSUS : TRAVAIL CUMULÉ + DÉPARTAGE DÉTERMINISTE
+// ============================================================
+
+function calculateChainWork(rawChain) {
+  const validation = validateExternalChain(rawChain);
+
+  if (!validation.valid) {
+    return null;
+  }
+
+  // La difficulté KOA est fixe (3) dans le format hash 2.
+  // Chaque bloc miné représente donc le même travail attendu.
+  // Le Genesis n'est pas compté comme travail minier.
+  return BigInt(Math.max(0, validation.chain.length - 1));
+}
+
+function lastBlockHash(rawChain) {
+  if (!Array.isArray(rawChain) || rawChain.length === 0) {
+    return "";
+  }
+
+  return String(rawChain[rawChain.length - 1]?.hash || "").toLowerCase();
+}
+
+function compareChains(candidateRawChain, currentRawChain) {
+  const candidateWork = calculateChainWork(candidateRawChain);
+  const currentWork = calculateChainWork(currentRawChain);
+
+  if (candidateWork === null) {
+    return { better: false, reason: "candidate-invalid", candidateWork, currentWork };
+  }
+
+  if (currentWork === null) {
+    return { better: true, reason: "current-invalid", candidateWork, currentWork };
+  }
+
+  if (candidateWork > currentWork) {
+    return { better: true, reason: "more-work", candidateWork, currentWork };
+  }
+
+  if (candidateWork < currentWork) {
+    return { better: false, reason: "less-work", candidateWork, currentWork };
+  }
+
+  const candidateHash = lastBlockHash(candidateRawChain);
+  const currentHash = lastBlockHash(currentRawChain);
+
+  if (candidateHash && currentHash && candidateHash < currentHash) {
+    return { better: true, reason: "tie-break-last-hash", candidateWork, currentWork };
+  }
+
+  return { better: false, reason: "current-chain-kept", candidateWork, currentWork };
+}
+
+function workToString(work) {
+  return typeof work === "bigint" ? work.toString() : null;
+}
+
 // ============================================================
 // TRANSACTIONS : OUTILS
 // ============================================================
@@ -1575,6 +1635,85 @@ async function broadcastBlock(
   );
 }
 
+
+// ============================================================
+// MOTEUR DE CONSENSUS
+// ============================================================
+
+async function performConsensus() {
+  const nodes = await getNodeUrls();
+  let bestChain = koala.chain;
+  let source = NODE_URL || "local";
+  const checked = [];
+
+  for (const node of nodes) {
+    try {
+      const data = await fetchJson(`${node}/api/chain`, {}, 15000);
+
+      if (!data || !Array.isArray(data.chain)) {
+        throw new Error("Réponse blockchain invalide.");
+      }
+
+      const validation = validateExternalChain(data.chain);
+      const candidateWork = validation.valid ? calculateChainWork(data.chain) : null;
+      const comparison = validation.valid
+        ? compareChains(data.chain, bestChain)
+        : { better: false, reason: "candidate-invalid" };
+
+      checked.push({
+        node,
+        length: data.chain.length,
+        valid: validation.valid,
+        cumulativeWork: workToString(candidateWork),
+        comparison: comparison.reason
+      });
+
+      if (validation.valid && comparison.better) {
+        bestChain = data.chain;
+        source = node;
+      }
+    } catch (error) {
+      checked.push({ node, valid: false, error: error.message });
+    }
+  }
+
+  const finalComparison = compareChains(bestChain, koala.chain);
+
+  if (finalComparison.better) {
+    await replaceChain(bestChain);
+
+    if (source && source !== "local" && !sameNode(source, NODE_URL)) {
+      await syncPendingTransactionsFromNode(source);
+      await saveState();
+    }
+
+    return {
+      success: true,
+      replaced: true,
+      message: "Blockchain locale synchronisée par consensus.",
+      source,
+      reason: finalComparison.reason,
+      blocks: koala.chain.length,
+      totalMined: koala.totalMined,
+      pendingTransactions: koala.pendingTransactions.length,
+      cumulativeWork: workToString(calculateChainWork(koala.chain)),
+      checked
+    };
+  }
+
+  return {
+    success: true,
+    replaced: false,
+    message: "Blockchain locale déjà conforme au consensus.",
+    source,
+    blocks: koala.chain.length,
+    totalMined: koala.totalMined,
+    pendingTransactions: koala.pendingTransactions.length,
+    cumulativeWork: workToString(calculateChainWork(koala.chain)),
+    checked
+  };
+}
+
 // ============================================================
 // ROUTES DE BASE
 // ============================================================
@@ -2272,16 +2411,16 @@ app.post(
         incomingBlock.previousHash !==
           latest.hash
       ) {
-        return res
-          .status(409)
-          .json({
-            success: false,
+        const consensus = await performConsensus();
 
-            syncRequired: true,
-
-            error:
-              "Chaîne locale différente. Consensus nécessaire."
-          });
+        return res.status(409).json({
+          success: false,
+          syncRequired: true,
+          consensusTriggered: true,
+          consensus,
+          error:
+            "Chaîne locale différente. Consensus automatique exécuté."
+        });
       }
 
       const validation =
@@ -2595,167 +2734,15 @@ app.post(
   "/api/consensus",
   async (req, res) => {
     try {
-      const nodes =
-        await getNodeUrls();
-
-      let bestChain =
-        koala.chain;
-
-      let bestLength =
-        koala.chain.length;
-
-      let source =
-        NODE_URL ||
-        "local";
-
-      const checked =
-        [];
-
-      for (
-        const node
-        of nodes
-      ) {
-        try {
-          const data =
-            await fetchJson(
-              `${node}/api/chain`
-            );
-
-          if (
-            !data ||
-            !Array.isArray(
-              data.chain
-            )
-          ) {
-            throw new Error(
-              "Réponse blockchain invalide."
-            );
-          }
-
-          const validation =
-            validateExternalChain(
-              data.chain
-            );
-
-          checked.push({
-            node,
-
-            length:
-              data.chain.length,
-
-            valid:
-              validation.valid
-          });
-
-          if (
-            validation.valid &&
-            data.chain.length >
-              bestLength
-          ) {
-            bestChain =
-              data.chain;
-
-            bestLength =
-              data.chain.length;
-
-            source =
-              node;
-          }
-        } catch (error) {
-          checked.push({
-            node,
-
-            valid: false,
-
-            error:
-              error.message
-          });
-        }
-      }
-
-      if (
-        bestLength >
-        koala.chain.length
-      ) {
-        await replaceChain(
-          bestChain
-        );
-
-        // Après remplacement de chaîne,
-        // tente aussi de récupérer le mempool
-        // du nœud ayant fourni la chaîne.
-
-        if (
-          source &&
-          source !== "local"
-        ) {
-          await syncPendingTransactionsFromNode(
-            source
-          );
-
-          await saveState();
-        }
-
-        return res.json({
-          success: true,
-
-          replaced: true,
-
-          message:
-            "Blockchain locale synchronisée.",
-
-          source,
-
-          blocks:
-            koala.chain.length,
-
-          totalMined:
-            koala.totalMined,
-
-          pendingTransactions:
-            koala
-              .pendingTransactions
-              .length,
-
-          checked
-        });
-      }
-
-      res.json({
-        success: true,
-
-        replaced: false,
-
-        message:
-          "Blockchain locale déjà à jour.",
-
-        blocks:
-          koala.chain.length,
-
-        totalMined:
-          koala.totalMined,
-
-        pendingTransactions:
-          koala
-            .pendingTransactions
-            .length,
-
-        checked
-      });
+      const result = await performConsensus();
+      res.json(result);
     } catch (error) {
-      console.error(
-        "Erreur consensus :",
-        error
-      );
+      console.error("Erreur consensus :", error);
 
-      res
-        .status(500)
-        .json({
-          success: false,
-
-          error:
-            error.message
-        });
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
     }
   }
 );
