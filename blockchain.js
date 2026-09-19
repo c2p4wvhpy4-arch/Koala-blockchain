@@ -786,8 +786,7 @@ class KoalaBlockchain {
   isChainValid() {
     for (
       let i = 1;
-      i <
-      this.chain.length;
+      i < this.chain.length;
       i++
     ) {
       const currentBlock =
@@ -798,27 +797,79 @@ class KoalaBlockchain {
           i - 1
         ];
 
+      // ------------------------------------------------------
+      // HASH DU BLOC
+      // ------------------------------------------------------
+
+      const recalculatedHash =
+        currentBlock
+          .calculateHash();
+
       if (
         currentBlock.hash !==
-        currentBlock.calculateHash()
+        recalculatedHash
       ) {
+        console.error(
+          `Bloc #${currentBlock.index} : hash invalide`
+        );
+
+        console.error(
+          "Hash enregistré :",
+          currentBlock.hash
+        );
+
+        console.error(
+          "Hash recalculé :",
+          recalculatedHash
+        );
+
         return false;
       }
+
+      // ------------------------------------------------------
+      // LIEN AVEC LE BLOC PRÉCÉDENT
+      // ------------------------------------------------------
 
       if (
         currentBlock.previousHash !==
         previousBlock.hash
       ) {
+        console.error(
+          `Bloc #${currentBlock.index} : previousHash invalide`
+        );
+
+        console.error(
+          "PreviousHash enregistré :",
+          currentBlock.previousHash
+        );
+
+        console.error(
+          "Hash bloc précédent :",
+          previousBlock.hash
+        );
+
         return false;
       }
+
+      // ------------------------------------------------------
+      // TRANSACTIONS
+      // ------------------------------------------------------
 
       if (
         !currentBlock
           .hasValidTransactions()
       ) {
+        console.error(
+          `Bloc #${currentBlock.index} : transaction invalide`
+        );
+
         return false;
       }
     }
+
+    console.log(
+      "Validation blockchain : OK"
+    );
 
     return true;
   }
