@@ -26,6 +26,14 @@ const BOOTSTRAP_NODE = String(process.env.BOOTSTRAP_NODE || "")
 const HASH_FORMAT_VERSION = 2;
 const USE_DATABASE = Boolean(DATABASE_URL);
 
+// Mode de test fork : désactive uniquement la DIFFUSION sortante.
+// À utiliser temporairement avec DISABLE_BROADCAST=true.
+// Le nœud continue de répondre aux routes réseau et au consensus.
+const DISABLE_BROADCAST =
+  String(process.env.DISABLE_BROADCAST || "")
+    .trim()
+    .toLowerCase() === "true";
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -925,6 +933,11 @@ async function registerWithBootstrap() {
 // ============================================================
 
 async function broadcastTransaction(transaction) {
+  if (DISABLE_BROADCAST) {
+    console.log("TEST FORK : diffusion transaction désactivée.");
+    return [];
+  }
+
   const nodes = await getNodeUrls();
 
   const results = await Promise.allSettled(
@@ -951,6 +964,11 @@ async function broadcastTransaction(transaction) {
 // ============================================================
 
 async function broadcastBlock(block) {
+  if (DISABLE_BROADCAST) {
+    console.log("TEST FORK : diffusion bloc désactivée.");
+    return [];
+  }
+
   const nodes = await getNodeUrls();
 
   const results = await Promise.allSettled(
@@ -1071,7 +1089,8 @@ app.get("/health", (req, res) => {
     symbol: koala.symbol,
     node: NODE_URL || null,
     bootstrapNode: BOOTSTRAP_NODE || null,
-    network: true
+    network: true,
+    broadcastEnabled: !DISABLE_BROADCAST
   });
 });
 
@@ -1095,6 +1114,7 @@ app.get("/api/info", async (req, res) => {
       totalMined: koala.totalMined,
       pendingTransactions: koala.pendingTransactions.length,
       hashFormat: HASH_FORMAT_VERSION,
+      broadcastEnabled: !DISABLE_BROADCAST,
       valid: koala.isChainValid()
     });
   } catch (error) {
@@ -1742,6 +1762,9 @@ async function start() {
       console.log("Signatures secp256k1 : OK");
       console.log("Validation renforcée : OK");
       console.log("Réseau multi-nœuds : OK");
+      console.log(
+        `Diffusion réseau : ${DISABLE_BROADCAST ? "DÉSACTIVÉE (TEST FORK)" : "ACTIVE"}`
+      );
       console.log(
         `Consensus automatique : ${CONSENSUS_INTERVAL_MS / 1000}s`
       );
